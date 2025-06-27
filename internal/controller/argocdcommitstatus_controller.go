@@ -68,8 +68,8 @@ type aggregate struct {
 // ArgoCDCommitStatusReconciler reconciles a ArgoCDCommitStatus object
 type ArgoCDCommitStatusReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Recorder    record.EventRecorder
+	Scheme *runtime.Scheme
+	record.EventRecorder
 	SettingsMgr *settings.Manager
 }
 
@@ -92,7 +92,7 @@ func (r *ArgoCDCommitStatusReconciler) Reconcile(ctx context.Context, req ctrl.R
 	logger.Info("Reconciling ArgoCDCommitStatus")
 	startTime := time.Now()
 	var argoCDCommitStatus promoterv1alpha1.ArgoCDCommitStatus
-	defer utils.HandleReconciliationResult(ctx, startTime, &argoCDCommitStatus, r.Client, r.Recorder, &err, string(conditions.Ready))
+	defer utils.HandleReconciliationResult(ctx, startTime, &argoCDCommitStatus, r, &err, string(conditions.Ready))
 
 	err = r.Get(ctx, req.NamespacedName, &argoCDCommitStatus, &client.GetOptions{})
 	if err != nil {

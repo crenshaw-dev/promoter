@@ -57,8 +57,8 @@ type ChangeTransferPolicyReconcilerConfig struct {
 // ChangeTransferPolicyReconciler reconciles a ChangeTransferPolicy object
 type ChangeTransferPolicyReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Recorder    record.EventRecorder
+	Scheme *runtime.Scheme
+	record.EventRecorder
 	SettingsMgr *settings.Manager
 }
 
@@ -81,7 +81,7 @@ func (r *ChangeTransferPolicyReconciler) Reconcile(ctx context.Context, req ctrl
 	startTime := time.Now()
 
 	var ctp promoterv1alpha1.ChangeTransferPolicy
-	defer utils.HandleReconciliationResult(ctx, startTime, &ctp, r.Client, r.Recorder, &err, string(conditions.Ready))
+	defer utils.HandleReconciliationResult(ctx, startTime, &ctp, r, &err, string(conditions.Ready))
 
 	err = r.Get(ctx, req.NamespacedName, &ctp, &client.GetOptions{})
 	if err != nil {
@@ -235,7 +235,7 @@ func (r *ChangeTransferPolicyReconciler) calculateStatus(ctx context.Context, ct
 	if err != nil {
 		var tooManyMatchingShaError *TooManyMatchingShaError
 		if errors.As(err, &tooManyMatchingShaError) {
-			r.Recorder.Event(ctp, "Warning", constants.TooManyMatchingShaReason, constants.TooManyMatchingShaActiveMessage)
+			r.EventRecorder.Event(ctp, "Warning", constants.TooManyMatchingShaReason, constants.TooManyMatchingShaActiveMessage)
 		}
 		return fmt.Errorf("failed to set active commit status state: %w", err)
 	}
@@ -244,7 +244,7 @@ func (r *ChangeTransferPolicyReconciler) calculateStatus(ctx context.Context, ct
 	if err != nil {
 		var tooManyMatchingShaError *TooManyMatchingShaError
 		if errors.As(err, &tooManyMatchingShaError) {
-			r.Recorder.Event(ctp, "Warning", constants.TooManyMatchingShaReason, constants.TooManyMatchingShaProposedMessage)
+			r.EventRecorder.Event(ctp, "Warning", constants.TooManyMatchingShaReason, constants.TooManyMatchingShaProposedMessage)
 		}
 		return fmt.Errorf("failed to set proposed commit status state: %w", err)
 	}
@@ -464,7 +464,7 @@ func (r *ChangeTransferPolicyReconciler) creatOrUpdatePullRequest(ctx context.Co
 			if err != nil {
 				return fmt.Errorf("failed to create PR from branch %q to %q: %w", ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, err)
 			}
-			r.Recorder.Event(ctp, "Normal", constants.PullRequestCreatedReason, fmt.Sprintf(constants.PullRequestCreatedMessage, pr.Name))
+			r.EventRecorder.Event(ctp, "Normal", constants.PullRequestCreatedReason, fmt.Sprintf(constants.PullRequestCreatedMessage, pr.Name))
 			logger.V(4).Info("Created pull request")
 		} else {
 			return fmt.Errorf("failed to get PR %q: %w", prName, err)
@@ -547,7 +547,7 @@ func (r *ChangeTransferPolicyReconciler) mergePullRequests(ctx context.Context, 
 				if err != nil {
 					return fmt.Errorf("failed to update PR %q: %w", pullRequest.Name, err)
 				}
-				r.Recorder.Event(ctp, "Normal", constants.PullRequestMergedReason, fmt.Sprintf(constants.PullRequestMergedMessage, pullRequest.Name))
+				r.EventRecorder.Event(ctp, "Normal", constants.PullRequestMergedReason, fmt.Sprintf(constants.PullRequestMergedMessage, pullRequest.Name))
 				logger.Info("Merged pull request")
 			} else if pullRequest.Status.State == promoterv1alpha1.PullRequestOpen {
 				// This is for the case where the PR is set to merge in k8s but something else is blocking it, like an external commit status check.
@@ -585,7 +585,7 @@ func (r *ChangeTransferPolicyReconciler) gitMergeStrategyOurs(ctx context.Contex
 		return fmt.Errorf("failed to merge branches %q and %q with 'ours' strategy: %w", ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, err)
 	}
 
-	r.Recorder.Event(ctp, "Normal", constants.ResolvedConflictReason, fmt.Sprintf(constants.ResolvedConflictMessage, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch))
+	r.EventRecorder.Event(ctp, "Normal", constants.ResolvedConflictReason, fmt.Sprintf(constants.ResolvedConflictMessage, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch))
 
 	return nil
 }

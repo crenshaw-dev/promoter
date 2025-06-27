@@ -51,8 +51,8 @@ import (
 // CommitStatusReconciler reconciles a CommitStatus object
 type CommitStatusReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Recorder    record.EventRecorder
+	Scheme *runtime.Scheme
+	record.EventRecorder
 	SettingsMgr *settings.Manager
 }
 
@@ -75,7 +75,7 @@ func (r *CommitStatusReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	startTime := time.Now()
 
 	var cs promoterv1alpha1.CommitStatus
-	defer utils.HandleReconciliationResult(ctx, startTime, &cs, r.Client, r.Recorder, &err, string(conditions.Ready))
+	defer utils.HandleReconciliationResult(ctx, startTime, &cs, r, &err, string(conditions.Ready))
 
 	err = r.Get(ctx, req.NamespacedName, &cs, &client.GetOptions{})
 	if err != nil {
@@ -146,7 +146,7 @@ func (r *CommitStatusReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to update CommitStatus %q, %w", req.Name, err)
 	}
-	r.Recorder.Eventf(&cs, "Normal", "CommitStatusSet", "Commit status %s set to %s for hash %s", cs.Name, cs.Spec.Phase, cs.Spec.Sha)
+	r.EventRecorder.Eventf(&cs, "Normal", "CommitStatusSet", "Commit status %s set to %s for hash %s", cs.Name, cs.Spec.Phase, cs.Spec.Sha)
 
 	return ctrl.Result{}, nil
 }

@@ -162,34 +162,34 @@ var _ = BeforeSuite(func() {
 	})
 
 	err = (&CommitStatusReconciler{
-		Client:      k8sManager.GetClient(),
-		Scheme:      k8sManager.GetScheme(),
-		Recorder:    k8sManager.GetEventRecorderFor("CommitStatus"),
-		SettingsMgr: settingsMgr,
+		Client:        k8sManager.GetClient(),
+		Scheme:        k8sManager.GetScheme(),
+		EventRecorder: k8sManager.GetEventRecorderFor("CommitStatus"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&PromotionStrategyReconciler{
-		Client:      k8sManager.GetClient(),
-		Scheme:      k8sManager.GetScheme(),
-		Recorder:    k8sManager.GetEventRecorderFor("PromotionStrategy"),
-		SettingsMgr: settingsMgr,
+		Client:        k8sManager.GetClient(),
+		Scheme:        k8sManager.GetScheme(),
+		EventRecorder: k8sManager.GetEventRecorderFor("PromotionStrategy"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&ChangeTransferPolicyReconciler{
-		Client:      k8sManager.GetClient(),
-		Scheme:      k8sManager.GetScheme(),
-		Recorder:    k8sManager.GetEventRecorderFor("ChangeTransferPolicy"),
-		SettingsMgr: settingsMgr,
+		Client:        k8sManager.GetClient(),
+		Scheme:        k8sManager.GetScheme(),
+		EventRecorder: k8sManager.GetEventRecorderFor("ChangeTransferPolicy"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&PullRequestReconciler{
-		Client:      k8sManager.GetClient(),
-		Scheme:      k8sManager.GetScheme(),
-		Recorder:    k8sManager.GetEventRecorderFor("PullRequest"),
-		SettingsMgr: settingsMgr,
+		Client:        k8sManager.GetClient(),
+		Scheme:        k8sManager.GetScheme(),
+		EventRecorder: k8sManager.GetEventRecorderFor("PullRequest"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

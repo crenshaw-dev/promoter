@@ -234,13 +234,18 @@ type StatusConditionUpdater interface {
 	GetConditions() *[]metav1.Condition
 }
 
+// Reconciler defines the interface for a reconciler that can update status conditions and record events.
+type Reconciler interface {
+	client.Client
+	record.EventRecorder
+}
+
 // HandleReconciliationResult handles reconciliation results for any object with status conditions.
 func HandleReconciliationResult(
 	ctx context.Context,
 	startTime time.Time,
 	obj StatusConditionUpdater,
-	client client.Client,
-	recorder record.EventRecorder,
+	r Reconciler,
 	err *error,
 	conditionType string,
 ) {
@@ -261,16 +266,16 @@ func HandleReconciliationResult(
 
 	if *err != nil {
 		if !k8serrors.IsConflict(*err) {
-			recorder.Eventf(obj, "Warning", "ReconcileError", "Reconciliation failed: %v", *err)
+			r.Eventf(obj, "Warning", "ReconcileError", "Reconciliation failed: %v", *err)
 		}
-		updateErr := updateCondition(ctx, obj, client, conditions, conditionType, metav1.ConditionFalse, string(promoterConditions.ReconciliationError), fmt.Sprintf("Reconciliation failed: %s", *err))
+		updateErr := updateCondition(ctx, obj, r, conditions, conditionType, metav1.ConditionFalse, string(promoterConditions.ReconciliationError), fmt.Sprintf("Reconciliation failed: %s", *err))
 		if updateErr != nil {
 			*err = fmt.Errorf("failed to update status with error condition: %w", updateErr)
 		}
 	} else {
-		recorder.Eventf(obj, "Normal", "ReconcileSuccess", "Reconciliation successful")
+		r.Eventf(obj, "Normal", "ReconcileSuccess", "Reconciliation successful")
 
-		updateErr := updateCondition(ctx, obj, client, conditions, conditionType, metav1.ConditionTrue, string(promoterConditions.ReconciliationSuccess), "Reconciliation succeeded")
+		updateErr := updateCondition(ctx, obj, r, conditions, conditionType, metav1.ConditionTrue, string(promoterConditions.ReconciliationSuccess), "Reconciliation succeeded")
 		if updateErr != nil {
 			*err = fmt.Errorf("failed to update status with success condition: %w", updateErr)
 		}

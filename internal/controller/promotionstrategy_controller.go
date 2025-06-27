@@ -47,8 +47,8 @@ import (
 // PromotionStrategyReconciler reconciles a PromotionStrategy object
 type PromotionStrategyReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Recorder    record.EventRecorder
+	Scheme *runtime.Scheme
+	record.EventRecorder
 	SettingsMgr *settings.Manager
 }
 
@@ -70,7 +70,7 @@ func (r *PromotionStrategyReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	var ps promoterv1alpha1.PromotionStrategy
 
-	defer utils.HandleReconciliationResult(ctx, startTime, &ps, r.Client, r.Recorder, &err, string(conditions.Ready))
+	defer utils.HandleReconciliationResult(ctx, startTime, &ps, r, &err, string(conditions.Ready))
 
 	err = r.Get(ctx, req.NamespacedName, &ps, &client.GetOptions{})
 	if err != nil {

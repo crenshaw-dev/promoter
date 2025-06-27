@@ -48,8 +48,8 @@ import (
 // PullRequestReconciler reconciles a PullRequest object
 type PullRequestReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Recorder    record.EventRecorder
+	Scheme *runtime.Scheme
+	record.EventRecorder
 	SettingsMgr *settings.Manager
 }
 
@@ -68,7 +68,7 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	startTime := time.Now()
 
 	var pr promoterv1alpha1.PullRequest
-	defer utils.HandleReconciliationResult(ctx, startTime, &pr, r.Client, r.Recorder, &err, string(conditions.Ready))
+	defer utils.HandleReconciliationResult(ctx, startTime, &pr, r, &err, string(conditions.Ready))
 
 	if err := r.Get(ctx, req.NamespacedName, &pr); err != nil {
 		if errors.IsNotFound(err) {
@@ -240,7 +240,7 @@ func (r *PullRequestReconciler) updatePullRequest(ctx context.Context, pr promot
 	if err := provider.Update(ctx, pr.Spec.Title, pr.Spec.Description, &pr); err != nil {
 		return fmt.Errorf("failed to update pull request: %w", err)
 	}
-	r.Recorder.Event(&pr, "Normal", "PullRequestUpdated", fmt.Sprintf("Pull Request %s updated", pr.Name))
+	r.EventRecorder.Event(&pr, "Normal", "PullRequestUpdated", fmt.Sprintf("Pull Request %s updated", pr.Name))
 	return nil
 }
 

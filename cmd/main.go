@@ -161,18 +161,18 @@ func main() {
 	})
 
 	if err = (&controller.PullRequestReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("PullRequest"),
-		SettingsMgr: settingsMgr,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("PullRequest"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(mgr); err != nil {
 		panic("unable to create PullRequest controller")
 	}
 	if err = (&controller.CommitStatusReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("CommitStatus"),
-		SettingsMgr: settingsMgr,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("CommitStatus"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(mgr); err != nil {
 		panic("unable to create CommitStatus controller")
 	}
@@ -185,10 +185,10 @@ func main() {
 	}
 
 	if err = (&controller.PromotionStrategyReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("PromotionStrategy"),
-		SettingsMgr: settingsMgr,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("PromotionStrategy"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(mgr); err != nil {
 		panic("unable to create PromotionStrategy controller")
 	}
@@ -207,18 +207,18 @@ func main() {
 	}
 
 	if err = (&controller.ChangeTransferPolicyReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("ChangeTransferPolicy"),
-		SettingsMgr: settingsMgr,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("ChangeTransferPolicy"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(mgr); err != nil {
 		panic("unable to create ChangeTransferPolicy controller")
 	}
 	if err = (&controller.ArgoCDCommitStatusReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Recorder:    mgr.GetEventRecorderFor("ArgoCDCommitStatus"),
-		SettingsMgr: settingsMgr,
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		EventRecorder: mgr.GetEventRecorderFor("ArgoCDCommitStatus"),
+		SettingsMgr:   settingsMgr,
 	}).SetupWithManager(mgr); err != nil {
 		panic("unable to create ArgoCDCommitStatus controller")
 	}
