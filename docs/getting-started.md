@@ -23,6 +23,10 @@ Alternatively, you can install GitOps Promoter using Helm. See the [ArtifactHub 
 
 Choose your provider:
 
+<!-- Intentionally no ### headings inside the tab bodies below: the tab strip is the only
+     navigation for each SCM—nested headings would flood the page TOC, clash with pymdownx
+     tab anchor IDs, and deep links would target content inside inactive/hidden panels. -->
+
 /// tab | GitHub
 
 You will need to [create a GitHub App](https://docs.github.com/en/developers/apps/creating-a-github-app) and configure
@@ -30,7 +34,7 @@ it to allow the GitOps Promoter to interact with your GitHub repository.
 
 During the creation the GitHub App, you will need to configure the following settings:
 
-### Permissions
+**Permissions**
 
 | Action         | Permission     |
 | -------------- | -------------- |
@@ -38,7 +42,7 @@ During the creation the GitHub App, you will need to configure the following set
 | `Contents`     | Read and write |
 | `Pull requests`| Read and write |
 
-### Webhooks (Optional - but highly recommended)
+**Webhooks (Optional - but highly recommended)**
 
 > [!NOTE]
 > We do support configuration of a GitHub App webhook that triggers PR creation upon Push. However, we do not configure
@@ -75,7 +79,7 @@ spec:
               number: 3333
 ```
 
-### Usage
+**Usage**
 
 The GitHub App will generate a private key that you will need to save. You will also need to get the App ID and the
 installation ID in a secret as follows:
@@ -297,7 +301,7 @@ spec:
 
 To configure the GitOps Promoter with Bitbucket Cloud, you will need to create a repository access token with the appropriate permissions and configure the necessary resources to allow the promoter to interact with your repository.
 
-### Creating a Bitbucket Cloud Repository Access Token
+**Creating a Bitbucket Cloud Repository Access Token**
 
 1. Navigate to your repository URL
 2. Click on "Repository settings" in the sidebar
@@ -308,7 +312,7 @@ To configure the GitOps Promoter with Bitbucket Cloud, you will need to create a
    * **Repositories**: Read and Write
    * **Pull requests**: Read and Write
 
-### Webhooks (Optional - but highly recommended)
+**Webhooks (Optional - but highly recommended)**
 
 > [!NOTE]
 > We do support configuration of a Bitbucket Cloud webhook that triggers PR creation upon Push. However, we do not configure
@@ -354,7 +358,7 @@ spec:
               number: 3333
 ```
 
-### Configuration
+**Configuration**
 
 This access token should be used in a secret as follows:
 
@@ -402,9 +406,9 @@ spec:
 
 To configure Gitops Promoter with Azure Devops, you will need to create a Personal Access Token (PAT).
 
-### ScmProvider
+**ScmProvider**
 
-#### PAT
+**PAT**
 
 Create an PAT in Azure Devops, that has 'Read & Write' on scope 'Code'.
 
@@ -428,7 +432,7 @@ spec:
     organization: <your-azdo-organization>
 ```
 
-### GitRepository
+**GitRepository**
 
 We also need a GitRepository referencing the ScmProvider:
 
