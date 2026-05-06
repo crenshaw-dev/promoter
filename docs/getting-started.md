@@ -7,8 +7,7 @@ GitHub, GitHub Enterprise, GitLab, Forgejo (including Codeberg), Gitea, Bitbucke
 
 * kubectl CLI
 * kubernetes cluster
-* GitHub or GitHub Enterprise Application
-  * Will take PRs to add support for other SCM providers
+* Credential or app on your SCM (see [SCM provider configuration](#scm-provider-configuration) below)
 
 ## Installation
 
@@ -20,7 +19,11 @@ kubectl apply -f https://github.com/argoproj-labs/gitops-promoter/releases/downl
 
 Alternatively, you can install GitOps Promoter using Helm. See the [ArtifactHub page](https://artifacthub.io/packages/helm/gitops-promoter/gitops-promoter) for instructions.
 
-## GitHub App Configuration
+## SCM provider configuration
+
+Choose your provider:
+
+/// tab | GitHub
 
 You will need to [create a GitHub App](https://docs.github.com/en/developers/apps/creating-a-github-app) and configure
 it to allow the GitOps Promoter to interact with your GitHub repository.
@@ -127,7 +130,9 @@ spec:
 > The GitRepository and ScmProvider also need to be installed to the same namespace that you plan on creating PromotionStrategy
 > resources in, and it also needs to be in the same namespace of the secret it references.
 
-## GitLab Configuration
+///
+
+/// tab | GitLab
 
 To configure the GitOps Promoter with GitLab, you will need to create a GitLab Access Token under the "Developer" role with `api` and `write_repository` scopes and configure the necessary resources to allow the promoter to interact with your repository. This Access Token should be used in a secret as follows:
 
@@ -171,7 +176,9 @@ spec:
 > GitLab does not support updating existing commit statuses without transitioning the state. So a pending CommitStatus's
 > description or URL may go stale if updated after creation.
 
-## Gitea Configuration
+///
+
+/// tab | Gitea
 
 To configure GitOps Promoter with Gitea, you will need to create an access token. See the [official Gitea documentation](https://docs.gitea.com/development/api-usage#generating-and-listing-api-tokens) for creating access tokens. The token needs `read and write` repository permissions.
 
@@ -228,7 +235,9 @@ spec:
     name: <your-scmprovider-name>
 ```
 
-## Forgejo Configuration
+///
+
+/// tab | Forgejo
 
 To configure Gitops Promoter with Forgejo, you will need to configure an App. The process is very similar to Codeberg. Here is the [official Codeberg documentation](https://docs.codeberg.org/advanced/access-token/) (note: Codeberg is powered by Forgejo under the hood). Give the `read and write` Token the permissions on the repository.
 
@@ -279,10 +288,12 @@ spec:
     owner: <organization-or-user-name>
     name: <repo-name>
   scmProviderRef:
-    name: <your-scmprovider-name> # The secret that contains the GitLab Access Token
+    name: <your-scmprovider-name> # The secret that contains the Forgejo access token
 ```
 
-## Bitbucket Cloud Configuration
+///
+
+/// tab | Bitbucket Cloud
 
 To configure the GitOps Promoter with Bitbucket Cloud, you will need to create a repository access token with the appropriate permissions and configure the necessary resources to allow the promoter to interact with your repository.
 
@@ -296,50 +307,6 @@ To configure the GitOps Promoter with Bitbucket Cloud, you will need to create a
 6. Select the following permissions:
    * **Repositories**: Read and Write
    * **Pull requests**: Read and Write
-
-## Azure DevOps Configuration
-
-To configure Gitops Promoter with Azure Devops, you will need to create a Personal Access Token (PAT).
-### ScmProvider
-#### PAT
-Create an PAT in Azure Devops, that has 'Read & Write' on scope 'Code'.
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: <your-secret-name>
-type: Opaque
-stringData:
-  token: <your-access-token>
----
-apiVersion: promoter.argoproj.io/v1alpha1
-kind: ScmProvider
-metadata:
-  name: <your-scmprovider-name>
-spec:
-  secretRef:
-    name: <your-secret-name>
-  azureDevOps:
-    organization: <your-azdo-organization>
-```
-
-### GitRepository
-
-We also need a GitRepository referencing the ScmProvider
-
-```yaml
-apiVersion: promoter.argoproj.io/v1alpha1
-kind: GitRepository
-metadata:
-  name: <git-repository-ref-name>
-spec:
-  azureDevOps:
-    project: <project-name>
-    name: <repo-name>
-  scmProviderRef:
-    name: <your-scmprovider-name>
-```
 
 ### Webhooks (Optional - but highly recommended)
 
@@ -428,6 +395,57 @@ spec:
 
 > [!NOTE]
 > The GitRepository and ScmProvider also need to be installed to the same namespace that you plan on creating PromotionStrategy resources in, and it also needs to be in the same namespace of the secret it references.
+
+///
+
+/// tab | Azure DevOps
+
+To configure Gitops Promoter with Azure Devops, you will need to create a Personal Access Token (PAT).
+
+### ScmProvider
+
+#### PAT
+
+Create an PAT in Azure Devops, that has 'Read & Write' on scope 'Code'.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: <your-secret-name>
+type: Opaque
+stringData:
+  token: <your-access-token>
+---
+apiVersion: promoter.argoproj.io/v1alpha1
+kind: ScmProvider
+metadata:
+  name: <your-scmprovider-name>
+spec:
+  secretRef:
+    name: <your-secret-name>
+  azureDevOps:
+    organization: <your-azdo-organization>
+```
+
+### GitRepository
+
+We also need a GitRepository referencing the ScmProvider:
+
+```yaml
+apiVersion: promoter.argoproj.io/v1alpha1
+kind: GitRepository
+metadata:
+  name: <git-repository-ref-name>
+spec:
+  azureDevOps:
+    project: <project-name>
+    name: <repo-name>
+  scmProviderRef:
+    name: <your-scmprovider-name>
+```
+
+///
 
 ## Promotion Strategy
 
