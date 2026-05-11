@@ -19,9 +19,12 @@ package controller
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	promoterv1alpha1 "github.com/argoproj-labs/gitops-promoter/api/v1alpha1"
 	"github.com/argoproj-labs/gitops-promoter/internal/types/constants"
@@ -31,6 +34,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +45,45 @@ import (
 var testChangeTransferPolicyYAML string
 
 const healthCheckCSKey = "health-check"
+
+// debugLogCommitStatusAndCTP writes CommitStatus + ChangeTransferPolicy fields relevant to spec-vs-status phase reads,
+// and runs the same client.List as ChangeTransferPolicy.setCommitStatusState (label key + field .spec.sha).
+func debugLogCommitStatusAndCTP(ctx context.Context, c ctrlclient.Client, step string, cs *promoterv1alpha1.CommitStatus, ctp *promoterv1alpha1.ChangeTransferPolicy) {
+	GinkgoHelper()
+	csJ, err := json.MarshalIndent(cs, "", "  ")
+	if err != nil {
+		csJ = []byte(fmt.Sprintf("<marshal CommitStatus: %v>", err))
+	}
+	ctpActiveJ, err := json.MarshalIndent(ctp.Status.Active, "", "  ")
+	if err != nil {
+		ctpActiveJ = []byte(fmt.Sprintf("<marshal CTP.Status.Active: %v>", err))
+	}
+	fmt.Fprintf(GinkgoWriter, "\n---------- DEBUG %s ----------\n", step)
+	fmt.Fprintf(GinkgoWriter, "CommitStatus %s/%s generation=%d resourceVersion=%s\n", cs.Namespace, cs.Name, cs.Generation, cs.ResourceVersion)
+	fmt.Fprintf(GinkgoWriter, "  spec.phase=%q spec.sha=%q spec.repositoryReference.name=%q spec.description=%q\n",
+		cs.Spec.Phase, cs.Spec.Sha, cs.Spec.RepositoryReference.Name, cs.Spec.Description)
+	fmt.Fprintf(GinkgoWriter, "  status.phase=%q status.sha=%q\n", cs.Status.Phase, cs.Status.Sha)
+	fmt.Fprintf(GinkgoWriter, "CommitStatus (full JSON):\n%s\n", csJ)
+	fmt.Fprintf(GinkgoWriter, "CTP %s/%s Status.Active (JSON):\n%s\n", ctp.Namespace, ctp.Name, ctpActiveJ)
+
+	sha := ctp.Status.Active.Hydrated.Sha
+	var csList promoterv1alpha1.CommitStatusList
+	listOpts := ctrlclient.ListOptions{
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			promoterv1alpha1.CommitStatusLabel: utils.KubeSafeLabel(healthCheckCSKey),
+		}),
+		FieldSelector: fields.SelectorFromSet(map[string]string{
+			".spec.sha": sha,
+		}),
+	}
+	lerr := c.List(ctx, &csList, &listOpts)
+	fmt.Fprintf(GinkgoWriter, "List same as CTP setCommitStatusState (no Namespace in options): label %s=%q field .spec.sha=%q -> err=%v len(items)=%d\n",
+		promoterv1alpha1.CommitStatusLabel, utils.KubeSafeLabel(healthCheckCSKey), sha, lerr, len(csList.Items))
+	for i, item := range csList.Items {
+		fmt.Fprintf(GinkgoWriter, "  [%d] %s/%s spec.sha=%q spec.phase=%q\n", i, item.Namespace, item.Name, item.Spec.Sha, item.Spec.Phase)
+	}
+	fmt.Fprintf(GinkgoWriter, "----------\n")
+}
 
 var _ = Describe("ChangeTransferPolicy Controller", func() {
 	var ctx context.Context
@@ -503,6 +547,12 @@ var _ = Describe("ChangeTransferPolicy Controller", func() {
 			It("should read phase from spec instead of status to avoid stale reads", func() {
 				By("Adding a pending commit")
 				makeChangeAndHydrateRepo(gitPath, gitRepo, "", "")
+
+				// This test relies on verifying that the CTP reads spec.phase instead of a stale status.phase. So we intentionally introduce drift.
+				// But if the CommitStatus is reconciled before the CTP, that drift is erased, and we have no way of knowing which field the CTP read.
+				// So we intentionally break the CommitStatus reconciliation by setting the RepositoryReference.Name to an invalid value. This ensures
+				// the simulated "stale" status.phase is preserved.
+				commitStatus.Spec.RepositoryReference.Name = "invalid-repo-commit-status-reconcile-block"
 
 				By("Creating CommitStatus with success in spec")
 				Eventually(func(g Gomega) {
