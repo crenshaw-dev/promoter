@@ -118,7 +118,7 @@ var _ = Describe("ChangeTransferPolicy Controller", func() {
 					}
 					err := k8sClient.Get(ctx, typeNamespacedNamePR, &pr)
 					g.Expect(err).To(Succeed())
-					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote %s to `%s`", shortSha, testBranchDevelopment)))
+					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote (%s) to `%s`", shortSha, testBranchDevelopment)))
 					g.Expect(pr.Status.State).To(Equal(promoterv1alpha1.PullRequestOpen))
 					g.Expect(pr.Name).To(Equal(utils.KubeSafeUniqueName(prName)))
 				}, constants.EventuallyTimeout).Should(Succeed())
@@ -132,7 +132,7 @@ var _ = Describe("ChangeTransferPolicy Controller", func() {
 						Namespace: "default",
 					}, &pr)
 					g.Expect(err).To(Succeed())
-					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote %s to `%s`", shortSha, testBranchDevelopment)))
+					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote (%s) to `%s`", shortSha, testBranchDevelopment)))
 					g.Expect(pr.Status.State).To(Equal(promoterv1alpha1.PullRequestOpen))
 					g.Expect(pr.Name).To(Equal(utils.KubeSafeUniqueName(prName)))
 				}, constants.EventuallyTimeout).Should(Succeed())
@@ -345,7 +345,7 @@ var _ = Describe("ChangeTransferPolicy Controller", func() {
 					}
 					err := k8sClient.Get(ctx, typeNamespacedNamePR, &pr)
 					g.Expect(err).To(Succeed())
-					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote %s to `%s`", shortSha, testBranchDevelopment)))
+					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote (%s) to `%s`", shortSha, testBranchDevelopment)))
 					g.Expect(pr.Status.State).To(Equal(promoterv1alpha1.PullRequestOpen))
 					g.Expect(pr.Name).To(Equal(utils.KubeSafeUniqueName(prName)))
 				}, constants.EventuallyTimeout).Should(Succeed())
@@ -359,7 +359,7 @@ var _ = Describe("ChangeTransferPolicy Controller", func() {
 						Namespace: "default",
 					}, &pr)
 					g.Expect(err).To(Succeed())
-					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote %s to `%s`", shortSha, testBranchDevelopment)))
+					g.Expect(pr.Spec.Title).To(Equal(fmt.Sprintf("Promote (%s) to `%s`", shortSha, testBranchDevelopment)))
 					g.Expect(pr.Status.State).To(Equal(promoterv1alpha1.PullRequestOpen))
 					g.Expect(pr.Name).To(Equal(utils.KubeSafeUniqueName(prName)))
 				}, constants.EventuallyTimeout).Should(Succeed())

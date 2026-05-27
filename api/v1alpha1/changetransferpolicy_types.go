@@ -43,6 +43,13 @@ type ChangeTransferPolicySpec struct {
 	// +kubebuilder:validation:MinLength=1
 	ActiveBranch string `json:"activeBranch"`
 
+	// ActivePath is an optional repository subpath for this policy's active state.
+	// When set, hydrator metadata is read from <activePath>/hydrator.metadata.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('/') && !self.endsWith('/') && !self.contains('/..') && !self.startsWith('..')",message="activePath must not be an absolute path, end with '/', or contain '..' path components"
+	ActivePath string `json:"activePath,omitempty"`
+
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default:=true
 	AutoMerge *bool `json:"autoMerge,omitempty"`

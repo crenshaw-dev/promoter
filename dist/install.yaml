@@ -397,6 +397,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - key
                 x-kubernetes-list-type: map
+              activePath:
+                description: |-
+                  ActivePath is an optional repository subpath for this policy's active state.
+                  When set, hydrator metadata is read from <activePath>/hydrator.metadata.
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: activePath must not be an absolute path, end with '/', or
+                    contain '..' path components
+                  rule: '!self.startsWith(''/'') && !self.endsWith(''/'') && !self.contains(''/..'')
+                    && !self.startsWith(''..'') '
               autoMerge:
                 default: true
                 type: boolean
@@ -4506,6 +4517,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - key
                 x-kubernetes-list-type: map
+              activePath:
+                description: |-
+                  ActivePath is an optional repository subpath for this strategy's active state.
+                  When set, proposed branches are created as <environment-branch>-next/<activePath>.
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: activePath must not be an absolute path, end with '/', or
+                    contain '..' path components
+                  rule: '!self.startsWith(''/'') && !self.endsWith(''/'') && !self.contains(''/..'')
+                    && !self.startsWith(''..'') '
               environments:
                 description: Environments is the sequence of environments that a dry
                   commit will be promoted through.

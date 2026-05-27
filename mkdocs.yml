@@ -53,6 +53,7 @@ nav:
       - Finalizers: debugging/finalizers.md
       - Labels: debugging/labels.md
   - Architecture: architecture.md
+  - Repository Structure: repository-structure.md
   - Custom Hydrator: custom-hydrator.md
   - CRD Specs: crd-specs.md
   - Gating Promotions: gating-promotions.md
@@ -82,3 +83,4 @@ plugins:
   - redirects:
       redirect_maps:
         'metrics.md': 'monitoring/metrics.md' # Page was moved to a subdirectory.
+        'contributing.md': 'contributing/index.md' # Page was moved to a subdirectory.

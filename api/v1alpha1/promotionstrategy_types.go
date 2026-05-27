@@ -59,6 +59,13 @@ type PromotionStrategySpec struct {
 	// +listType:=map
 	// +listMapKey=branch
 	Environments []Environment `json:"environments"`
+
+	// ActivePath is an optional repository subpath for this strategy's active state.
+	// When set, proposed branches are created as <environment-branch>-next/<activePath>.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="!self.startsWith('/') && !self.endsWith('/') && !self.contains('/..') && !self.startsWith('..')",message="activePath must not be an absolute path, end with '/', or contain '..' path components"
+	ActivePath string `json:"activePath,omitempty"`
 }
 
 // Environment defines a single environment in the promotion sequence.
