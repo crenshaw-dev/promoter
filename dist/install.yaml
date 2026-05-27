@@ -404,10 +404,10 @@ spec:
                 minLength: 1
                 type: string
                 x-kubernetes-validations:
-                - message: activePath must not be an absolute path, end with '/', or
-                    contain '..' path components
+                - message: activePath must not be an absolute path, end with '/',
+                    or contain '..' path components
                   rule: '!self.startsWith(''/'') && !self.endsWith(''/'') && !self.contains(''/..'')
-                    && !self.startsWith(''..'') '
+                    && !self.startsWith(''..'')'
               autoMerge:
                 default: true
                 type: boolean
@@ -4524,10 +4524,10 @@ spec:
                 minLength: 1
                 type: string
                 x-kubernetes-validations:
-                - message: activePath must not be an absolute path, end with '/', or
-                    contain '..' path components
+                - message: activePath must not be an absolute path, end with '/',
+                    or contain '..' path components
                   rule: '!self.startsWith(''/'') && !self.endsWith(''/'') && !self.contains(''/..'')
-                    && !self.startsWith(''..'') '
+                    && !self.startsWith(''..'')'
               environments:
                 description: Environments is the sequence of environments that a dry
                   commit will be promoted through.
@@ -8399,11 +8399,13 @@ spec:
       requeueDuration: 5m
   pullRequest:
     template:
-      description: This PR is promoting the environment branch `{{ .ChangeTransferPolicy.Spec.ActiveBranch
-        }}` which is currently on dry sha {{ .ChangeTransferPolicy.Status.Active.Dry.Sha
-        }} to dry sha {{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}.
-      title: Promote {{ trunc 5 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }} to
-        `{{ .ChangeTransferPolicy.Spec.ActiveBranch }}`
+      description: This PR is promoting {{ with .ChangeTransferPolicy.Spec.ActivePath
+        }}`{{ . }}` on {{ end }}the environment branch `{{ .ChangeTransferPolicy.Spec.ActiveBranch
+        }}` from dry sha {{ .ChangeTransferPolicy.Status.Active.Dry.Sha }} to {{ .ChangeTransferPolicy.Status.Proposed.Dry.Sha
+        }}.
+      title: Promote {{ with .ChangeTransferPolicy.Spec.ActivePath }}`{{ . }}` {{
+        end }}({{ trunc 5 .ChangeTransferPolicy.Status.Proposed.Dry.Sha }}) to `{{
+        .ChangeTransferPolicy.Spec.ActiveBranch }}`
     workQueue:
       maxConcurrentReconciles: 10
       rateLimiter:

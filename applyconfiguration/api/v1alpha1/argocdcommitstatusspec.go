@@ -24,6 +24,8 @@ import (
 // ArgoCDCommitStatusSpecApplyConfiguration represents a declarative configuration of the ArgoCDCommitStatusSpec type for use
 // with apply.
 //
+// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 // ArgoCDCommitStatusSpec defines the desired state of ArgoCDCommitStatus.
 type ArgoCDCommitStatusSpecApplyConfiguration struct {
 	// PromotionStrategyRef is a reference to the promotion strategy that this commit status applies to.
@@ -75,5 +77,3 @@ func (b *ArgoCDCommitStatusSpecApplyConfiguration) WithURL(value *URLConfigApply
 	b.URL = value
 	return b
 }
-
-

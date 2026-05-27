@@ -73,10 +73,10 @@ spec:
                 minLength: 1
                 type: string
                 x-kubernetes-validations:
-                - message: activePath must not be an absolute path, end with '/', or
-                    contain '..' path components
+                - message: activePath must not be an absolute path, end with '/',
+                    or contain '..' path components
                   rule: '!self.startsWith(''/'') && !self.endsWith(''/'') && !self.contains(''/..'')
-                    && !self.startsWith(''..'') '
+                    && !self.startsWith(''..'')'
               environments:
                 description: Environments is the sequence of environments that a dry
                   commit will be promoted through.

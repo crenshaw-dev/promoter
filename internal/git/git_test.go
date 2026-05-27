@@ -104,7 +104,7 @@ var _ = Describe("GetBranchShas", func() {
 				},
 			}
 			gap := &fakeGitProvider{tempDirPath: tempRepoDir}
-			g := git.NewEnvironmentOperations(repo, gap, defaultBranch)
+			g := git.NewEnvironmentOperations(repo, gap, defaultBranch, "")
 			Expect(g.CloneRepo(GinkgoT().Context())).To(Succeed())
 
 			// Call GetBranchShas with a non-existent branch
@@ -347,7 +347,7 @@ var _ = Describe("ActivePath support", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		gap := &fakeGitProvider{tempDirPath: tempRepoDir}
-		g = git.NewEnvironmentOperations(repo, gap, "environment/development")
+		g = git.NewEnvironmentOperations(repo, gap, "environment/development", "")
 		Expect(g.CloneRepo(GinkgoT().Context())).To(Succeed())
 
 		shas, err := g.GetBranchShas(GinkgoT().Context(), "environment/development", "apps/app-one")
@@ -410,7 +410,7 @@ var _ = Describe("ActivePath support", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		gap := &fakeGitProvider{tempDirPath: tempRepoDir}
-		g = git.NewEnvironmentOperations(repo, gap, "active")
+		g = git.NewEnvironmentOperations(repo, gap, "active", "")
 		Expect(g.CloneRepo(GinkgoT().Context())).To(Succeed())
 		_, err = g.GetBranchShas(GinkgoT().Context(), "proposed-app-one-next", "apps/app-one")
 		Expect(err).NotTo(HaveOccurred())

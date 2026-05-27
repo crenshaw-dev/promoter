@@ -251,7 +251,7 @@ var _ = Describe("ArgoCDCommitStatus Controller", func() {
 				})
 				g.Expect(err).ToNot(HaveOccurred())
 				g.Expect(commitStatusList.Items).To(HaveLen(1))
-				g.Expect(commitStatusList.Items[0].Spec.Name).To(Equal(testBranchStaging + "/health"))
+				g.Expect(commitStatusList.Items[0].Spec.Name).To(Equal(customCommitStatusKey + "/" + testBranchStaging))
 			}, constants.EventuallyTimeout).Should(Succeed())
 
 			// Clean up

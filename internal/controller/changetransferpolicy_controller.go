@@ -142,11 +142,7 @@ func (r *ChangeTransferPolicyReconciler) Reconcile(ctx context.Context, req ctrl
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get GitRepository: %w", err)
 	}
-	cloneKey := ctp.Spec.ActiveBranch
-	if ctp.Spec.ActivePath != "" {
-		cloneKey = ctp.Spec.ActiveBranch + "/" + ctp.Spec.ActivePath
-	}
-	gitOperations := git.NewEnvironmentOperations(gitRepo, gitAuthProvider, cloneKey)
+	gitOperations := git.NewEnvironmentOperations(gitRepo, gitAuthProvider, ctp.Spec.ActiveBranch, ctp.Spec.ActivePath)
 
 	// TODO: could probably short circuit the clone and use an ls-remote to compare the sha's of the current ctp status,
 	// this would help with slamming the git provider with clone requests on controller restarts.

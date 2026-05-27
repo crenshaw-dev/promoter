@@ -86,10 +86,10 @@ spec:
                 minLength: 1
                 type: string
                 x-kubernetes-validations:
-                - message: activePath must not be an absolute path, end with '/', or
-                    contain '..' path components
+                - message: activePath must not be an absolute path, end with '/',
+                    or contain '..' path components
                   rule: '!self.startsWith(''/'') && !self.endsWith(''/'') && !self.contains(''/..'')
-                    && !self.startsWith(''..'') '
+                    && !self.startsWith(''..'')'
               autoMerge:
                 default: true
                 type: boolean

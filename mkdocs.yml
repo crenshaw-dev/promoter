@@ -83,4 +83,3 @@ plugins:
   - redirects:
       redirect_maps:
         'metrics.md': 'monitoring/metrics.md' # Page was moved to a subdirectory.
-        'contributing.md': 'contributing/index.md' # Page was moved to a subdirectory.
