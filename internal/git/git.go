@@ -485,7 +485,9 @@ func (g *EnvironmentOperations) HasConflict(ctx context.Context, proposedBranch,
 // MergeWithOursStrategy merges the proposed branch into the active branch using the "ours" strategy.
 // This assumes that both branches have already been fetched via GetBranchShas earlier in the reconciliation,
 // ensuring we merge the exact same refs that were checked for conflicts.
-func (g *EnvironmentOperations) MergeWithOursStrategy(ctx context.Context, proposedBranch, activeBranch string) error {
+//
+// Returns the SHA of the new merge commit on the proposed branch.
+func (g *EnvironmentOperations) MergeWithOursStrategy(ctx context.Context, proposedBranch, activeBranch string) (string, error) {
 	logger := log.FromContext(ctx)
 	gitPath := gitpaths.Get(g.cacheKey())
 
@@ -494,78 +496,106 @@ func (g *EnvironmentOperations) MergeWithOursStrategy(ctx context.Context, propo
 	_, stderr, err := g.runCmd(ctx, gitPath, "checkout", "-B", proposedBranch, "origin/"+proposedBranch)
 	if err != nil {
 		logger.Error(err, "Failed to checkout branch", "branch", proposedBranch, "stderr", stderr)
-		return fmt.Errorf("failed to checkout branch %q: %w (stderr: %s)", proposedBranch, err, stderr)
+		return "", fmt.Errorf("failed to checkout branch %q: %w (stderr: %s)", proposedBranch, err, stderr)
 	}
 
 	// Perform the merge with "ours" strategy using the already-fetched origin ref
 	_, stderr, err = g.runCmd(ctx, gitPath, "merge", "-s", "ours", "origin/"+activeBranch)
 	if err != nil {
 		logger.Error(err, "Failed to merge branch", "proposedBranch", proposedBranch, "activeBranch", activeBranch, "stderr", stderr)
-		return fmt.Errorf("failed to merge branch %q into %q with 'ours' strategy: %w", activeBranch, proposedBranch, err)
+		return "", fmt.Errorf("failed to merge branch %q into %q with 'ours' strategy: %w", activeBranch, proposedBranch, err)
 	}
 
 	// Push the changes to the remote repository
 	_, stderr, err = g.runCmd(ctx, gitPath, "push", "origin", proposedBranch)
 	if err != nil {
 		logger.Error(err, "Failed to push merged branch", "proposedBranch", proposedBranch, "activeBranch", activeBranch, "stderr", stderr)
-		return fmt.Errorf("failed to push merged branch %q: %w", proposedBranch, err)
+		return "", fmt.Errorf("failed to push merged branch %q: %w", proposedBranch, err)
+	}
+
+	newSha, stderr, err := g.runCmd(ctx, gitPath, "rev-parse", "HEAD")
+	if err != nil {
+		logger.Error(err, "Failed to get new merge commit SHA", "proposedBranch", proposedBranch, "stderr", stderr)
+		return "", fmt.Errorf("failed to get new merge commit SHA on %q: %w (stderr: %s)", proposedBranch, err, stderr)
 	}
 
 	logger.Info("Successfully merged branches with 'ours' strategy", "proposedBranch", proposedBranch, "activeBranch", activeBranch)
-	return nil
+	return strings.TrimSpace(newSha), nil
 }
 
-// MergeWithOursStrategyForPath resolves conflicts by taking proposed branch content only within activePath and
-// active branch content everywhere else.
-func (g *EnvironmentOperations) MergeWithOursStrategyForPath(ctx context.Context, proposedBranch, activeBranch, activePath string) error {
+// MergeWithOursStrategyForPath rewrites the proposed branch as "proposed inside <activePath>, active
+// everywhere else" so the next SCM merge of proposed → active is a clean fast-forward and the
+// promoting PromotionStrategy can never affect content outside its own subtree. The active branch
+// always wins outside <activePath>, regardless of whether the merge would have produced a conflict.
+//
+// This is the only place the controller modifies a proposed branch. By restricting that modification
+// to the owning PromotionStrategy's <activePath>, multiple PromotionStrategies on a shared active
+// branch stay isolated from each other at promotion time even if a hydrator accidentally wrote
+// something outside its <activePath>.
+//
+// Returns the SHA of the new merge commit on the proposed branch.
+func (g *EnvironmentOperations) MergeWithOursStrategyForPath(ctx context.Context, proposedBranch, activeBranch, activePath string) (string, error) {
 	logger := log.FromContext(ctx)
 	gitPath := gitpaths.Get(g.cacheKey())
 
 	_, stderr, err := g.runCmd(ctx, gitPath, "checkout", "-B", proposedBranch, "origin/"+proposedBranch)
 	if err != nil {
 		logger.Error(err, "Failed to checkout branch", "branch", proposedBranch, "stderr", stderr)
-		return fmt.Errorf("failed to checkout branch %q: %w", proposedBranch, err)
+		return "", fmt.Errorf("failed to checkout branch %q: %w", proposedBranch, err)
 	}
 
+	// Open a merge with active so we record a real merge commit (parents = proposed, active) but
+	// don't keep the merge engine's resolved tree — the next two checkouts overwrite it. We tolerate
+	// CONFLICT output from this command because we are about to re-resolve the tree manually.
 	stdout, stderr, err := g.runCmd(ctx, gitPath, "merge", "--no-commit", "--no-ff", "origin/"+activeBranch)
 	if err != nil && !strings.Contains(stdout, "CONFLICT") && !strings.Contains(stderr, "CONFLICT") &&
 		!strings.Contains(stdout, "Automatic merge failed") && !strings.Contains(stderr, "Automatic merge failed") {
+		// Best-effort cleanup so a stuck merge state doesn't poison the next reconcile.
+		_, _, _ = g.runCmd(ctx, gitPath, "merge", "--abort")
 		logger.Error(err, "Failed to start merge", "proposedBranch", proposedBranch, "activeBranch", activeBranch, "stderr", stderr)
-		return fmt.Errorf("failed to merge branch %q into %q: %w (stdout: %s, stderr: %s)", activeBranch, proposedBranch, err, stdout, stderr)
+		return "", fmt.Errorf("failed to merge branch %q into %q: %w (stdout: %s, stderr: %s)", activeBranch, proposedBranch, err, stdout, stderr)
 	}
 
+	// Active wins everywhere…
 	_, stderr, err = g.runCmd(ctx, gitPath, "checkout", "origin/"+activeBranch, "--", ".")
 	if err != nil {
 		logger.Error(err, "Failed to checkout active branch content", "activeBranch", activeBranch, "stderr", stderr)
-		return fmt.Errorf("failed to checkout active branch content from %q: %w (stderr: %s)", activeBranch, err, stderr)
+		return "", fmt.Errorf("failed to checkout active branch content from %q: %w (stderr: %s)", activeBranch, err, stderr)
 	}
 
+	// …except inside the activePath, where proposed always wins.
 	_, stderr, err = g.runCmd(ctx, gitPath, "checkout", "origin/"+proposedBranch, "--", activePath)
 	if err != nil {
 		logger.Error(err, "Failed to checkout proposed activePath content", "proposedBranch", proposedBranch, "activePath", activePath, "stderr", stderr)
-		return fmt.Errorf("failed to checkout activePath %q from proposed branch %q: %w (stderr: %s)", activePath, proposedBranch, err, stderr)
+		return "", fmt.Errorf("failed to checkout activePath %q from proposed branch %q: %w (stderr: %s)", activePath, proposedBranch, err, stderr)
 	}
 
 	_, stderr, err = g.runCmd(ctx, gitPath, "add", "-A")
 	if err != nil {
 		logger.Error(err, "Failed to stage files during path-scoped merge", "stderr", stderr)
-		return fmt.Errorf("failed to stage files for path-scoped merge: %w (stderr: %s)", err, stderr)
+		return "", fmt.Errorf("failed to stage files for path-scoped merge: %w (stderr: %s)", err, stderr)
 	}
 
 	_, stderr, err = g.runCmd(ctx, gitPath, "commit", "-m", "Resolve conflicts for "+activePath)
 	if err != nil {
 		logger.Error(err, "Failed to commit path-scoped merge", "proposedBranch", proposedBranch, "activeBranch", activeBranch, "activePath", activePath, "stderr", stderr)
-		return fmt.Errorf("failed to commit path-scoped merge for branch %q: %w (stderr: %s)", proposedBranch, err, stderr)
+		return "", fmt.Errorf("failed to commit path-scoped merge for branch %q: %w (stderr: %s)", proposedBranch, err, stderr)
 	}
 
 	_, stderr, err = g.runCmd(ctx, gitPath, "push", "origin", proposedBranch)
 	if err != nil {
 		logger.Error(err, "Failed to push merged branch", "proposedBranch", proposedBranch, "activeBranch", activeBranch, "stderr", stderr)
-		return fmt.Errorf("failed to push merged branch %q: %w (stderr: %s)", proposedBranch, err, stderr)
+		return "", fmt.Errorf("failed to push merged branch %q: %w (stderr: %s)", proposedBranch, err, stderr)
+	}
+
+	newSha, stderr, err := g.runCmd(ctx, gitPath, "rev-parse", "HEAD")
+	if err != nil {
+		logger.Error(err, "Failed to get new merge commit SHA", "proposedBranch", proposedBranch, "stderr", stderr)
+		return "", fmt.Errorf("failed to get new merge commit SHA on %q: %w (stderr: %s)", proposedBranch, err, stderr)
 	}
 
 	logger.Info("Successfully merged branches with path-scoped strategy", "proposedBranch", proposedBranch, "activeBranch", activeBranch, "activePath", activePath)
-	return nil
+	return strings.TrimSpace(newSha), nil
 }
 
 // GetRevListFirstParent retrieves the first parent commit SHAs for the given branch using git rev-list.

@@ -163,9 +163,18 @@ func (r *ChangeTransferPolicyReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, fmt.Errorf("failed to calculate ChangeTransferPolicy status: %w", err)
 	}
 
-	err = r.gitMergeStrategyOurs(ctx, gitOperations, &ctp)
+	newProposedSha, err := r.gitMergeStrategyOurs(ctx, gitOperations, &ctp)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to git merge for conflict resolution: %w", err)
+	}
+
+	// Conflict resolution rewrites the proposed branch tip. The new merge commit preserves
+	// proposed's <activePath>/hydrator.metadata bit-for-bit (and, in the no-activePath case, the
+	// whole tree via "merge -s ours"), so the dry metadata already on ctp.Status.Proposed.Dry is
+	// still correct. Only Hydrated.Sha needs to point at the new commit so PullRequest.spec.mergeSha
+	// matches what SCM providers will merge into the active branch.
+	if newProposedSha != "" {
+		ctp.Status.Proposed.Hydrated.Sha = newProposedSha
 	}
 
 	pr, err := r.creatOrUpdatePullRequest(ctx, &ctp)
@@ -1260,39 +1269,41 @@ func (r *ChangeTransferPolicyReconciler) mergePullRequests(ctx context.Context, 
 	return pr, nil
 }
 
-// gitMergeStrategyOurs tests if there is a conflict between the active and proposed branches. If there is, we
-// perform a merge with ours as the strategy. This is to prevent conflicts in the pull request by assuming that
-// the proposed branch is the source of truth.
-func (r *ChangeTransferPolicyReconciler) gitMergeStrategyOurs(ctx context.Context, gitOperations *git.EnvironmentOperations, ctp *promoterv1alpha1.ChangeTransferPolicy) error {
+// gitMergeStrategyOurs tests if there is a conflict between the active and proposed branches. If there is, it
+// rewrites the proposed branch with the result of merging active into it (path-scoped or whole-tree, depending on
+// whether activePath is set on the CTP). Returns the SHA of the new merge commit on the proposed branch, or "" if
+// no merge was performed because there was no conflict.
+func (r *ChangeTransferPolicyReconciler) gitMergeStrategyOurs(ctx context.Context, gitOperations *git.EnvironmentOperations, ctp *promoterv1alpha1.ChangeTransferPolicy) (string, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Testing for conflicts between branches", "proposed", ctp.Spec.ProposedBranch, "active", ctp.Spec.ActiveBranch)
 
 	// Check if there's a conflict between branches
 	hasConflict, err := gitOperations.HasConflict(ctx, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch)
 	if err != nil {
-		return fmt.Errorf("failed to check for conflicts between branches %q and %q: %w", ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, err)
+		return "", fmt.Errorf("failed to check for conflicts between branches %q and %q: %w", ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, err)
 	}
 
 	if !hasConflict {
 		logger.V(4).Info("No conflicts detected between branches", "proposed", ctp.Spec.ProposedBranch, "active", ctp.Spec.ActiveBranch)
-		return nil // No conflict, nothing to do
+		return "", nil // No conflict, nothing to do
 	}
 
 	// If we have a conflict, perform a merge with "ours" strategy
 	logger.Info("Conflicts detected, performing merge with 'ours' strategy", "proposed", ctp.Spec.ProposedBranch, "active", ctp.Spec.ActiveBranch, "activePath", ctp.Spec.ActivePath)
 
+	var newSha string
 	if ctp.Spec.ActivePath != "" {
-		err = gitOperations.MergeWithOursStrategyForPath(ctx, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, ctp.Spec.ActivePath)
+		newSha, err = gitOperations.MergeWithOursStrategyForPath(ctx, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, ctp.Spec.ActivePath)
 	} else {
-		err = gitOperations.MergeWithOursStrategy(ctx, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch)
+		newSha, err = gitOperations.MergeWithOursStrategy(ctx, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch)
 	}
 	if err != nil {
-		return fmt.Errorf("failed to merge branches %q and %q with 'ours' strategy: %w", ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, err)
+		return "", fmt.Errorf("failed to merge branches %q and %q with 'ours' strategy: %w", ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch, err)
 	}
 
 	r.Recorder.Eventf(ctp, nil, "Normal", constants.ResolvedConflictReason, "ResolvingConflict", constants.ResolvedConflictMessage, ctp.Spec.ProposedBranch, ctp.Spec.ActiveBranch)
 
-	return nil
+	return newSha, nil
 }
 
 // handleFinalizer ensures ChangeTransferPolicyPullRequestCleanupFinalizer is on the CTP while it exists so deletion
