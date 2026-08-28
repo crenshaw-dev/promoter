@@ -306,17 +306,24 @@ var _ = Describe("PullRequest Controller", func() {
 
 			It("should successfully reconcile the resource when closing", func() {
 				By("Reconciling closing of the PullRequest")
-				Eventually(func(g Gomega) {
-					_ = k8sClient.Get(ctx, typeNamespacedName, pullRequest)
-					pullRequest.Spec.State = "closed"
-					g.Expect(k8sClient.Update(ctx, pullRequest)).To(Succeed())
-				}, constants.EventuallyTimeout).Should(Succeed())
+				Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				findOpenBefore := fake.FindOpenCallCount()
+				getBefore := fake.GetCallCount()
+				pullRequest.Spec.State = promoterv1alpha1.PullRequestClosed
+				Expect(k8sClient.Update(ctx, pullRequest)).To(Succeed())
 
 				Eventually(func(g Gomega) {
 					err := k8sClient.Get(ctx, typeNamespacedName, pullRequest)
 					g.Expect(err).To(HaveOccurred())
 					g.Expect(err.Error()).To(ContainSubstring("pullrequests.promoter.argoproj.io \"" + name + "\" not found"))
 				}, constants.EventuallyTimeout).Should(Succeed())
+
+				By("Verifying spec→closed cleanup uses no FindOpen and at most two Gets on the SCM")
+				Expect(fake.FindOpenCallCount() - findOpenBefore).To(BeZero())
+				// Terminating cleanup normally needs one Get (sync before Close). A second Get can
+				// happen when the micro-requeue runs before the informer observes the status.closed
+				// patch from the prior reconcile (read-your-writes is not available on the cached client yet).
+				Expect(fake.GetCallCount() - getBefore).To(BeNumerically("<=", 2))
 
 				By("Verifying a PullRequestClosed event was emitted")
 				Eventually(func(g Gomega) {

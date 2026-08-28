@@ -34,6 +34,8 @@ var (
 
 	// findOpenCallCount is incremented on every FindOpen call (for tests).
 	findOpenCallCount atomic.Uint64
+	// getCallCount is incremented on every Get call (for tests).
+	getCallCount atomic.Uint64
 	// updateCallCount is incremented on every Update call (for tests).
 	updateCallCount atomic.Uint64
 	// mergeShaMismatchCount is incremented every time Merge is called with a PR
@@ -248,6 +250,11 @@ func ResetFindOpenCallCount() {
 	findOpenCallCount.Store(0)
 }
 
+// ResetGetCallCount resets the test-only counter of Get invocations.
+func ResetGetCallCount() {
+	getCallCount.Store(0)
+}
+
 // ResetUpdateCallCount resets the test-only counter of Update invocations.
 func ResetUpdateCallCount() {
 	updateCallCount.Store(0)
@@ -256,12 +263,18 @@ func ResetUpdateCallCount() {
 // ResetPullRequestSCMCallCounts resets both FindOpen and Update test counters.
 func ResetPullRequestSCMCallCounts() {
 	ResetFindOpenCallCount()
+	ResetGetCallCount()
 	ResetUpdateCallCount()
 }
 
 // FindOpenCallCount returns how many times FindOpen has been invoked since the last reset.
 func FindOpenCallCount() uint64 {
 	return findOpenCallCount.Load()
+}
+
+// GetCallCount returns how many times Get has been invoked since the last reset.
+func GetCallCount() uint64 {
+	return getCallCount.Load()
 }
 
 // UpdateCallCount returns how many times Update has been invoked since the last reset.
@@ -342,6 +355,8 @@ func (pr *PullRequest) FindOpen(ctx context.Context, pullRequest v1alpha1.PullRe
 
 // Get fetches a pull request by status.id.
 func (pr *PullRequest) Get(ctx context.Context, pullRequest v1alpha1.PullRequest) (scms.GetPullRequestResult, error) {
+	getCallCount.Add(1)
+
 	gitRepo, err := utils.GetGitRepositoryFromObjectKey(ctx, pr.k8sClient, client.ObjectKey{Namespace: pullRequest.Namespace, Name: pullRequest.Spec.RepositoryReference.Name})
 	if err != nil {
 		return scms.GetPullRequestResult{}, fmt.Errorf("failed to get GitRepository: %w", err)

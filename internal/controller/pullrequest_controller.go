@@ -164,6 +164,15 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	if pr.Spec.State == promoterv1alpha1.PullRequestClosed {
+		// If we're marked closed, delete ourselves. Delete -> close anyway, so that lets us centralize our close logic.
+		if err = r.Delete(ctx, &pr); err != nil && !k8serrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("failed to delete PullRequest that's marked closed: %w", err)
+		}
+		// Requeue immediately so deletion logic kicks in.
+		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
+	}
+
 	// This short-circuit avoids FindOpen (and other) SCM calls for a very narrow kind of reconcile:
 	// where the PR is marked open, the resource isn't being deleted, the spec has changed, and the
 	// _only_ changes to the spec do not require an Update to the SCM PR (title/description) or
@@ -475,6 +484,9 @@ func (r *PullRequestReconciler) recoverLostTerminalStatus(ctx context.Context, p
 // previousReady is the Ready condition from the previous reconcile; SCM create/merge failure events
 // are emitted only on the first failure after a healthy reconcile so backoff retries don't spam
 // events (the evolving error stays visible on the Ready condition).
+//
+// This function does NOT handle "closed." That's handled early in reconciliation by deleting the PullRequest and going
+// through the deletion handling logic.
 func (r *PullRequestReconciler) handleStateTransitions(ctx context.Context, pr *promoterv1alpha1.PullRequest, provider scms.PullRequestProvider, previousReady *metav1.Condition) (bool, error) {
 	logger := log.FromContext(ctx)
 
@@ -525,14 +537,8 @@ func (r *PullRequestReconciler) handleStateTransitions(ctx context.Context, pr *
 			return false, fmt.Errorf("failed to merge pull request: %w", err) // Top-level wrap for merge errors
 		}
 		return true, nil
-	case promoterv1alpha1.PullRequestClosed:
-		logger.Info("Closing PullRequest")
-		if err := r.closePullRequest(ctx, pr, provider); err != nil {
-			return false, fmt.Errorf("failed to close pull request: %w", err) // Top-level wrap for close errors
-		}
-		return true, nil
 	default:
-		return false, fmt.Errorf("unknown PullRequest state %q: this should not happen, please report a bug", pr.Spec.State)
+		return false, fmt.Errorf("unexpected PullRequest state %q: this should not happen, please report a bug", pr.Spec.State)
 	}
 
 	return false, nil
@@ -770,9 +776,15 @@ func (r *PullRequestReconciler) reconcileDeletion(ctx context.Context, pr *promo
 	}
 
 	if pr.Status.State != promoterv1alpha1.PullRequestMerged && pr.Status.State != promoterv1alpha1.PullRequestClosed {
-		if err = r.closePullRequest(ctx, pr, provider); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to close pull request: %w", err) // Top-level wrap for close errors
+		// PullRequest is being deleted, and it's neither merged nor closed on the SCM. By definition, deletion -> close.
+		// This is the ONLY place we call the SCM to close. Everywhere else should instead delete the PullRequest
+		// resource so that close logic is centralized here.
+		if err = provider.Close(ctx, *pr); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to close pull request: %w", err)
 		}
+		pr.Status.State = promoterv1alpha1.PullRequestClosed
+		r.Recorder.Eventf(pr, nil, "Normal", constants.PullRequestClosedReason, "ClosingPullRequest", constants.PullRequestClosedMessage, pr.Name)
+		// Requeue immediately so the next reconcile removes the finalizer.
 		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
 	}
 
@@ -920,15 +932,6 @@ func deletionBlockedByMissingDependencyError(err error) error {
 		)
 	}
 	return fmt.Errorf("%s: %w", msg, err)
-}
-
-func (r *PullRequestReconciler) closePullRequest(ctx context.Context, pr *promoterv1alpha1.PullRequest, provider scms.PullRequestProvider) error {
-	if err := provider.Close(ctx, *pr); err != nil {
-		return err //nolint:wrapcheck // Error wrapping handled at top level
-	}
-	pr.Status.State = promoterv1alpha1.PullRequestClosed
-	r.Recorder.Eventf(pr, nil, "Normal", constants.PullRequestClosedReason, "ClosingPullRequest", constants.PullRequestClosedMessage, pr.Name)
-	return nil
 }
 
 // syncAppliedLabelsFromFindOpen refreshes status.appliedLabels from SCM labels returned by FindOpen.
