@@ -636,6 +636,121 @@ var _ = Describe("PullRequest Controller", func() {
 		})
 	})
 
+	Context("When deleting a terminating PullRequest with a known status.id", func() {
+		const blockingFinalizer = "promoter.argoproj.io/test-block-findopen-on-delete"
+
+		var name string
+		var scmSecret *v1.Secret
+		var scmProvider *promoterv1alpha1.ScmProvider
+		var gitRepo *promoterv1alpha1.GitRepository
+		var pullRequest *promoterv1alpha1.PullRequest
+		var typeNamespacedName types.NamespacedName
+
+		BeforeEach(func() {
+			name, scmSecret, scmProvider, gitRepo, pullRequest = pullRequestResources(ctx, "delete-known-id-no-findopen")
+
+			typeNamespacedName = types.NamespacedName{
+				Name:      name,
+				Namespace: "default",
+			}
+
+			Expect(k8sClient.Create(ctx, scmSecret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, scmProvider)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gitRepo)).To(Succeed())
+			Expect(k8sClient.Create(ctx, pullRequest)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				g.Expect(pullRequest.Status.State).To(Equal(promoterv1alpha1.PullRequestOpen))
+				g.Expect(pullRequest.Status.ID).ToNot(BeEmpty())
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				g.Expect(pullRequest.Finalizers).To(ContainElement(promoterv1alpha1.PullRequestFinalizer))
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+			base := pullRequest.DeepCopy()
+			pullRequest.Finalizers = append(pullRequest.Finalizers, blockingFinalizer)
+			Expect(k8sClient.Patch(ctx, pullRequest, client.MergeFrom(base))).To(Succeed())
+		})
+
+		AfterEach(func() {
+			var pr promoterv1alpha1.PullRequest
+			if err := k8sClient.Get(ctx, typeNamespacedName, &pr); err != nil {
+				return
+			}
+			if pr.DeletionTimestamp == nil {
+				return
+			}
+			var kept []string
+			for _, f := range pr.Finalizers {
+				if f != blockingFinalizer {
+					kept = append(kept, f)
+				}
+			}
+			if len(kept) == len(pr.Finalizers) {
+				return
+			}
+			base := pr.DeepCopy()
+			pr.Finalizers = kept
+			_ = k8sClient.Patch(ctx, &pr, client.MergeFrom(base))
+		})
+
+		It("should not call FindOpen while reconciling deletion", func() {
+			fakeProvider := fake.NewFakePullRequestProvider(k8sClient)
+			fake.ResetFindOpenCallCount()
+
+			By("Deleting the PullRequest while status.id is already known")
+			Expect(k8sClient.Delete(ctx, pullRequest)).To(Succeed())
+
+			By("Waiting for the object to enter terminating state with a known SCM id")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				g.Expect(pullRequest.DeletionTimestamp).ToNot(BeNil())
+				g.Expect(pullRequest.Status.ID).ToNot(BeEmpty())
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Forcing another reconcile while the object is still terminating")
+			triggerPRReconcile(ctx, typeNamespacedName, pullRequest)
+
+			Consistently(func(g Gomega) {
+				g.Expect(fake.FindOpenCallCount()).To(BeZero())
+			}, 2*time.Second, 50*time.Millisecond).Should(Succeed())
+
+			By("Waiting for deletion finalization to finish and release the promoter finalizer")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				g.Expect(pullRequest.Finalizers).NotTo(ContainElement(promoterv1alpha1.PullRequestFinalizer))
+				g.Expect(pullRequest.Finalizers).To(ContainElement(blockingFinalizer))
+				g.Expect(pullRequest.Status.State).To(Equal(promoterv1alpha1.PullRequestClosed))
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Verifying the SCM-side PR was closed during deletion finalization")
+			Eventually(func(g Gomega) {
+				exists, state, _, err := fakeProvider.GetRecordedState(ctx, *pullRequest)
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(exists).To(BeTrue())
+				g.Expect(state).To(Equal(promoterv1alpha1.PullRequestClosed))
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Releasing the blocking finalizer so the PullRequest can be removed")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+			base := pullRequest.DeepCopy()
+			pullRequest.Finalizers = slices.DeleteFunc(slices.Clone(pullRequest.Finalizers), func(f string) bool {
+				return f == blockingFinalizer
+			})
+			Expect(k8sClient.Patch(ctx, pullRequest, client.MergeFrom(base))).To(Succeed())
+
+			By("Verifying the PullRequest is fully deleted")
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, typeNamespacedName, pullRequest)
+				g.Expect(k8serrors.IsNotFound(err)).To(BeTrue())
+			}, constants.EventuallyTimeout).Should(Succeed())
+		})
+	})
+
 	Context("When deleting resources with finalizers", func() {
 		Context("When PullRequest depends on GitRepository", func() {
 			var name string

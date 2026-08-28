@@ -146,12 +146,7 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, fmt.Errorf("failed to get PullRequest provider: %w", err)
 		}
 
-		openResult, err := provider.FindOpen(ctx, pr)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to check for open PR: %w", err)
-		}
-
-		return r.reconcileDeletion(ctx, &pr, provider, openResult)
+		return r.reconcileDeletion(ctx, &pr, provider)
 	}
 
 	// The PullRequest isn't terminating.
@@ -773,22 +768,12 @@ func (r *PullRequestReconciler) ensureFinalizer(ctx context.Context, pr *promote
 //
 // The caller guarantees the finalizer is still held; a terminating PullRequest without it is short
 // circuited in Reconcile.
-func (r *PullRequestReconciler) reconcileDeletion(ctx context.Context, pr *promoterv1alpha1.PullRequest, provider scms.PullRequestProvider, openResult scms.FindOpenResult) (ctrl.Result, error) {
+func (r *PullRequestReconciler) reconcileDeletion(ctx context.Context, pr *promoterv1alpha1.PullRequest, provider scms.PullRequestProvider) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-
-	// Still listed as open, so it cannot have merged and there is no terminal outcome left to learn.
-	// Closing it discharges the finalizer's obligation.
-	if openResult.Found {
-		if err := r.closePullRequest(ctx, pr, provider); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to close pull request: %w", err) // Top-level wrap for close errors
-		}
-		// Let the deferred status apply land before the finalizer is reconsidered.
-		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
-	}
 
 	// Ask the SCM what became of it. This is the only source of merged-vs-closed and of
 	// status.mergedTargetSha once the pull request has left the open list.
-	statusMutated, err := r.syncStateFromProvider(ctx, pr, provider, openResult.Found, openResult.ID, openResult.CreationTime)
+	statusMutated, err := r.syncStateFromProvider(ctx, pr, provider, false, "", time.Time{})
 	if err != nil {
 		return ctrl.Result{}, err
 	}
