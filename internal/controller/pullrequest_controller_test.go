@@ -571,6 +571,71 @@ var _ = Describe("PullRequest Controller", func() {
 		})
 	})
 
+	Context("When deleting a PullRequest that already has a terminal SCM outcome in status", func() {
+		var name string
+		var scmSecret *v1.Secret
+		var scmProvider *promoterv1alpha1.ScmProvider
+		var gitRepo *promoterv1alpha1.GitRepository
+		var pullRequest *promoterv1alpha1.PullRequest
+		var typeNamespacedName types.NamespacedName
+
+		BeforeEach(func() {
+			name, scmSecret, scmProvider, gitRepo, pullRequest = pullRequestResources(ctx, "delete-terminal-status")
+
+			typeNamespacedName = types.NamespacedName{
+				Name:      name,
+				Namespace: "default",
+			}
+
+			Expect(k8sClient.Create(ctx, scmSecret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, scmProvider)).To(Succeed())
+			Expect(k8sClient.Create(ctx, gitRepo)).To(Succeed())
+			Expect(k8sClient.Create(ctx, pullRequest)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				g.Expect(pullRequest.Status.State).To(Equal(promoterv1alpha1.PullRequestOpen))
+				g.Expect(pullRequest.Status.ID).ToNot(BeEmpty())
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				g.Expect(pullRequest.Finalizers).To(ContainElement(promoterv1alpha1.PullRequestFinalizer))
+			}, constants.EventuallyTimeout).Should(Succeed())
+		})
+
+		It("should terminate and disappear without making SCM calls", func() {
+			By("Recording a terminal closed outcome in status without deleting yet")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				pullRequest.Status.State = promoterv1alpha1.PullRequestClosed
+				g.Expect(k8sClient.Status().Update(ctx, pullRequest)).To(Succeed())
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+				g.Expect(pullRequest.Status.State).To(Equal(promoterv1alpha1.PullRequestClosed))
+				g.Expect(pullRequestHasTerminalSCMOutcome(pullRequest)).To(BeTrue())
+				g.Expect(pullRequest.DeletionTimestamp).To(BeNil())
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Deleting and verifying the controller does not call the SCM")
+			fake.ResetPullRequestSCMCallCounts()
+			fake.ResetLabelCallCount()
+			Expect(k8sClient.Delete(ctx, pullRequest)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, typeNamespacedName, pullRequest)
+				g.Expect(k8serrors.IsNotFound(err)).To(BeTrue())
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			Consistently(func(g Gomega) {
+				g.Expect(fake.PullRequestSCMCallCount()).To(BeZero())
+				g.Expect(fake.LabelCallCount()).To(BeZero())
+			}, 2*time.Second, 50*time.Millisecond).Should(Succeed())
+		})
+	})
+
 	Context("When deleting resources with finalizers", func() {
 		Context("When PullRequest depends on GitRepository", func() {
 			var name string

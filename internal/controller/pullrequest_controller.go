@@ -117,11 +117,22 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	//nolint:nestif // terminating PullRequest path intentionally keeps related branches together
 	if !pr.GetDeletionTimestamp().IsZero() {
 		if pr.Status.ID == "" {
 			// We never got an ID, so this PR never synced its state to the SCM. Not worth trying to recover.
+			logger.V(4).Info("Releasing finalizer for terminating PR with unknown ID")
 			if err = r.releaseFinalizer(ctx, &pr); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to release finalizer for terminating PR with unknown ID: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+
+		if pullRequestHasTerminalSCMOutcome(&pr) {
+			// There's nothing left to learn about this PR.
+			logger.V(4).Info("Releasing finalizer for terminating PR with terminal status")
+			if err = r.releaseFinalizer(ctx, &pr); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to release finalizer for terminating PR with terminal status already recorded: %w", err)
 			}
 			return ctrl.Result{}, nil
 		}
