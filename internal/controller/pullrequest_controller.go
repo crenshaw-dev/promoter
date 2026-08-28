@@ -117,9 +117,14 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion early - if being deleted and status.ID is empty, we can skip provider setup
-	if handled, err := r.handleEmptyIDDeletion(ctx, &pr); handled || err != nil {
-		return ctrl.Result{}, err
+	if !pr.GetDeletionTimestamp().IsZero() {
+		if pr.Status.ID == "" {
+			// We never got an ID, so this PR never synced its state to the SCM. Not worth trying to recover.
+			if err = r.releaseFinalizer(ctx, &pr); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to release finalizer for terminating PR with unknown ID: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
 	// This short-circuit avoids FindOpen (and other) SCM calls for a very narrow kind of reconcile:
@@ -221,22 +226,6 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	return ctrl.Result{RequeueAfter: requeueDuration}, nil
-}
-
-// handleEmptyIDDeletion handles the case where a PullRequest is being deleted but never created a PR on the SCM.
-// Returns (handled=true, nil) if deletion was handled, (false, nil) if not applicable, or (false, err) on error.
-func (r *PullRequestReconciler) handleEmptyIDDeletion(ctx context.Context, pr *promoterv1alpha1.PullRequest) (bool, error) {
-	if pr.DeletionTimestamp.IsZero() || pr.Status.ID != "" {
-		return false, nil
-	}
-
-	if controllerutil.ContainsFinalizer(pr, promoterv1alpha1.PullRequestFinalizer) {
-		controllerutil.RemoveFinalizer(pr, promoterv1alpha1.PullRequestFinalizer)
-		if err := r.Update(ctx, pr); err != nil {
-			return true, fmt.Errorf("failed to remove finalizer: %w", err)
-		}
-	}
-	return true, nil
 }
 
 // cleanupTerminalStates deletes PullRequests that have reached terminal states (merged/closed) or were externally merged/closed.
