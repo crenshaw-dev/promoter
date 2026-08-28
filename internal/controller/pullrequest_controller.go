@@ -138,6 +138,10 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, nil
 		}
 
+		// After this point, no other code should clear our finalizer. We keep trying until we reach a terminal state.
+		// If any subsequent code thinks it's moved us toward a terminal state, it should just requeue and let the code
+		// above handle it.
+
 		provider, err := r.getPullRequestProvider(ctx, pr)
 		if err != nil {
 			if blockedErr := deletionBlockedByMissingDependencyError(err); blockedErr != nil {
@@ -249,8 +253,6 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // cleanupTerminalStates deletes PullRequests that have reached terminal states (merged/closed) or were externally merged/closed.
 // Returns (cleaned=true, nil) if cleaned up, (false, nil) if not applicable, or (false, err) on error.
 func (r *PullRequestReconciler) cleanupTerminalStates(ctx context.Context, pr *promoterv1alpha1.PullRequest) (bool, error) {
-	logger := log.FromContext(ctx)
-
 	// Check if PR should be cleaned up: either externally merged/closed or in terminal state (merged/closed)
 	// When ExternallyMergedOrClosed is true, State may be empty (we don't know if merged or closed),
 	// Open (set before we detected the external action), or a terminal state.
@@ -261,32 +263,12 @@ func (r *PullRequestReconciler) cleanupTerminalStates(ctx context.Context, pr *p
 		return false, nil
 	}
 
-	if pullRequestAwaitingMergedTargetSha(pr) {
-		logger.V(4).Info("merged pull request missing mergedTargetSha, waiting for SCM lookup", "pullRequestID", pr.Status.ID)
-		return false, nil
-	}
-
-	if externallyMergedOrClosed {
-		logger.Info("Cleaning up externally merged or closed pull request", "pullRequestID", pr.Status.ID)
-	} else {
-		logger.Info("Cleaning up closed and merged pull request", "pullRequestID", pr.Status.ID)
-	}
-
-	// TODO: The PullRequest finalizer could be removed immediately after a successful merge/close on the SCM
-	// (when we first know SCM cleanup is done), and optionally initiate Delete in that same reconciliation, to
-	// save an extra reconcile. We remove it here alongside Delete instead to keep the terminal-cleanup path
-	// simple and reliable.
-	if controllerutil.ContainsFinalizer(pr, promoterv1alpha1.PullRequestFinalizer) {
-		controllerutil.RemoveFinalizer(pr, promoterv1alpha1.PullRequestFinalizer)
-		if err := r.Update(ctx, pr); err != nil {
-			return false, fmt.Errorf("failed to remove finalizer before cleanup delete: %w", err)
-		}
-	}
-
+	// Delete and let the next reconcile assess whether we need to gather any more data from the SCM before removing our
+	// finalizer.
 	if err := r.Delete(ctx, pr); err != nil && !k8serrors.IsNotFound(err) {
-		logger.Error(err, "Failed to delete PullRequest")
 		return false, fmt.Errorf("failed to delete PullRequest: %w", err)
 	}
+
 	return true, nil
 }
 
@@ -788,7 +770,7 @@ func (r *PullRequestReconciler) reconcileDeletion(ctx context.Context, pr *promo
 	}
 
 	if pullRequestHasTerminalSCMOutcome(pr) {
-		return ctrl.Result{}, r.releaseFinalizer(ctx, pr)
+		return ctrl.Result{}, nil
 	}
 
 	// The only non-terminal outcome left is Get reporting the pull request still open even though
