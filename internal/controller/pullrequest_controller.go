@@ -130,7 +130,9 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 		if pullRequestHasTerminalSCMOutcome(&pr) {
-			// There's nothing left to learn about this PR.
+			// There's nothing left to learn about this PR. This is the ONLY place that should assess whether the state
+			// is terminal. Any subsequent code that thinks it might have moved us toward a terminal state should just
+			// set its status fields and requeue.
 			logger.V(4).Info("Releasing finalizer for terminating PR with terminal status")
 			if err = r.releaseFinalizer(ctx, &pr); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to release finalizer for terminating PR with terminal status already recorded: %w", err)
@@ -754,8 +756,6 @@ func (r *PullRequestReconciler) ensureFinalizer(ctx context.Context, pr *promote
 // The caller guarantees the finalizer is still held; a terminating PullRequest without it is short
 // circuited in Reconcile.
 func (r *PullRequestReconciler) reconcileDeletion(ctx context.Context, pr *promoterv1alpha1.PullRequest, provider scms.PullRequestProvider) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
 	// Ask the SCM what became of it. This is the only source of merged-vs-closed and of
 	// status.mergedTargetSha once the pull request has left the open list.
 	statusMutated, err := r.syncStateFromProvider(ctx, pr, provider, false, "", time.Time{})
@@ -769,19 +769,14 @@ func (r *PullRequestReconciler) reconcileDeletion(ctx context.Context, pr *promo
 		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
 	}
 
-	if pullRequestHasTerminalSCMOutcome(pr) {
-		return ctrl.Result{}, nil
+	if pr.Status.State != promoterv1alpha1.PullRequestMerged && pr.Status.State != promoterv1alpha1.PullRequestClosed {
+		if err = r.closePullRequest(ctx, pr, provider); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to close pull request: %w", err) // Top-level wrap for close errors
+		}
+		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
 	}
 
-	// The only non-terminal outcome left is Get reporting the pull request still open even though
-	// FindOpen missed it (SCM list lag). Leaving it open is precisely what this finalizer prevents.
-	logger.Info("PullRequest is terminating and still open on the SCM despite not being listed, closing it",
-		"pullRequestID", pr.Status.ID)
-	if err := r.closePullRequest(ctx, pr, provider); err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to close pull request: %w", err) // Top-level wrap for close errors
-	}
-	// Let the deferred status apply land before the finalizer is reconsidered.
-	return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
+	return ctrl.Result{}, nil
 }
 
 // releaseFinalizer removes the PullRequest finalizer, allowing the resource to be removed once no
@@ -928,9 +923,6 @@ func deletionBlockedByMissingDependencyError(err error) error {
 }
 
 func (r *PullRequestReconciler) closePullRequest(ctx context.Context, pr *promoterv1alpha1.PullRequest, provider scms.PullRequestProvider) error {
-	if pr.Status.State == promoterv1alpha1.PullRequestMerged {
-		return nil
-	}
 	if err := provider.Close(ctx, *pr); err != nil {
 		return err //nolint:wrapcheck // Error wrapping handled at top level
 	}
