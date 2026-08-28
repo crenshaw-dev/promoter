@@ -151,6 +151,13 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// The PullRequest isn't terminating.
 
+	// Add our own finalizer to ensure cleanup. If reconciliation breaks further down (e.g. misconfigured provider), the
+	// PullRequest resource will be "stuck." That's intentional. If we later decide that's annoying, we can set the
+	// finalizer at some later point, maybe after the first successful SCM call.
+	if err := r.ensureFinalizer(ctx, &pr); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// This short-circuit avoids FindOpen (and other) SCM calls for a very narrow kind of reconcile:
 	// where the PR is marked open, the resource isn't being deleted, the spec has changed, and the
 	// _only_ changes to the spec do not require an Update to the SCM PR (title/description) or
@@ -188,10 +195,6 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	openResult, err := provider.FindOpen(ctx, pr)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to check for open PR: %w", err)
-	}
-
-	if err := r.ensureFinalizer(ctx, &pr); err != nil {
-		return ctrl.Result{}, err
 	}
 
 	// Sync state from provider before terminal cleanup so Get-by-ID can populate mergedTargetSha.

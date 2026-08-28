@@ -365,6 +365,17 @@ var _ = Describe("PullRequest Controller", func() {
 					g.Expect(pullRequest.Status.Conditions[0].Message).To(ContainSubstring("secret from ScmProvider not found"))
 				}, constants.EventuallyTimeout).Should(Succeed())
 			})
+
+			It("should add the promoter finalizer even when provider resolution fails", func() {
+				By("Checking the finalizer is present despite the provider error and empty status.id")
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
+					g.Expect(pullRequest.Finalizers).To(ContainElement(promoterv1alpha1.PullRequestFinalizer))
+					g.Expect(pullRequest.Status.ID).To(BeEmpty())
+					g.Expect(pullRequest.Status.Conditions).ToNot(BeEmpty())
+					g.Expect(meta.IsStatusConditionFalse(pullRequest.Status.Conditions, string(conditions.Ready))).To(BeTrue())
+				}, constants.EventuallyTimeout).Should(Succeed())
+			})
 		})
 
 		Context("When merge SHA is invalid", func() {
