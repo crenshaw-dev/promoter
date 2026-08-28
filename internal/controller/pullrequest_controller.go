@@ -117,6 +117,7 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	// All deletion logic lives in this block.
 	//nolint:nestif // terminating PullRequest path intentionally keeps related branches together
 	if !pr.GetDeletionTimestamp().IsZero() {
 		if pr.Status.ID == "" {
@@ -136,7 +137,24 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			}
 			return ctrl.Result{}, nil
 		}
+
+		provider, err := r.getPullRequestProvider(ctx, pr)
+		if err != nil {
+			if blockedErr := deletionBlockedByMissingDependencyError(err); blockedErr != nil {
+				return ctrl.Result{}, blockedErr
+			}
+			return ctrl.Result{}, fmt.Errorf("failed to get PullRequest provider: %w", err)
+		}
+
+		openResult, err := provider.FindOpen(ctx, pr)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to check for open PR: %w", err)
+		}
+
+		return r.reconcileDeletion(ctx, &pr, provider, openResult)
 	}
+
+	// The PullRequest isn't terminating.
 
 	// This short-circuit avoids FindOpen (and other) SCM calls for a very narrow kind of reconcile:
 	// where the PR is marked open, the resource isn't being deleted, the spec has changed, and the
@@ -169,21 +187,12 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	provider, err := r.getPullRequestProvider(ctx, pr)
 	if err != nil {
-		if !pr.DeletionTimestamp.IsZero() {
-			if blockedErr := deletionBlockedByMissingDependencyError(err); blockedErr != nil {
-				return ctrl.Result{}, blockedErr
-			}
-		}
 		return ctrl.Result{}, fmt.Errorf("failed to get PullRequest provider: %w", err)
 	}
 
 	openResult, err := provider.FindOpen(ctx, pr)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to check for open PR: %w", err)
-	}
-
-	if !pr.DeletionTimestamp.IsZero() {
-		return r.reconcileDeletion(ctx, &pr, provider, openResult)
 	}
 
 	if err := r.ensureFinalizer(ctx, &pr); err != nil {
