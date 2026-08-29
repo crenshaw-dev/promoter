@@ -46,12 +46,13 @@ var (
 )
 
 type pullRequestProviderState struct {
-	createdAt        time.Time
-	id               string
-	state            v1alpha1.PullRequestState
-	mergedTargetSha  string
-	labels           []string
-	hideFromFindOpen bool
+	createdAt                    time.Time
+	id                           string
+	state                        v1alpha1.PullRequestState
+	mergedTargetSha              string
+	labels                       []string
+	hideFromFindOpen             bool
+	omitMergedTargetShaOnNextGet bool
 }
 
 // PullRequest implements the scms.PullRequestProvider interface for testing purposes.
@@ -362,13 +363,14 @@ func (pr *PullRequest) Get(ctx context.Context, pullRequest v1alpha1.PullRequest
 		return scms.GetPullRequestResult{}, fmt.Errorf("failed to get GitRepository: %w", err)
 	}
 
-	mutexPR.RLock()
-	defer mutexPR.RUnlock()
+	mutexPR.Lock()
+	defer mutexPR.Unlock()
 	if pullRequests == nil {
 		return scms.GetPullRequestResult{}, nil
 	}
 
-	st, ok := pullRequests[pr.getMapKey(pullRequest, gitRepo.Spec.Fake.Owner, gitRepo.Spec.Fake.Name)]
+	prKey := pr.getMapKey(pullRequest, gitRepo.Spec.Fake.Owner, gitRepo.Spec.Fake.Name)
+	st, ok := pullRequests[prKey]
 	if !ok || st.id != pullRequest.Status.ID {
 		return scms.GetPullRequestResult{}, nil
 	}
@@ -379,6 +381,11 @@ func (pr *PullRequest) Get(ctx context.Context, pullRequest v1alpha1.PullRequest
 	}
 	if st.state == v1alpha1.PullRequestMerged {
 		result.MergedTargetSHA = st.mergedTargetSha
+		if st.omitMergedTargetShaOnNextGet {
+			result.MergedTargetSHA = ""
+			st.omitMergedTargetShaOnNextGet = false
+			pullRequests[prKey] = st
+		}
 	}
 	return result, nil
 }
@@ -431,6 +438,32 @@ func (pr *PullRequest) SetHideFromFindOpen(ctx context.Context, pullRequest v1al
 	return nil
 }
 
+// MarkClosedExternally marks a pull request as closed on the fake SCM without going through Close.
+func (pr *PullRequest) MarkClosedExternally(ctx context.Context, pullRequest v1alpha1.PullRequest) error {
+	gitRepo, err := utils.GetGitRepositoryFromObjectKey(ctx, pr.k8sClient, client.ObjectKey{Namespace: pullRequest.Namespace, Name: pullRequest.Spec.RepositoryReference.Name})
+	if err != nil {
+		return fmt.Errorf("failed to get GitRepository: %w", err)
+	}
+
+	mutexPR.Lock()
+	defer mutexPR.Unlock()
+	if pullRequests == nil {
+		return errors.New("pull request not found")
+	}
+	prKey := pr.getMapKey(pullRequest, gitRepo.Spec.Fake.Owner, gitRepo.Spec.Fake.Name)
+	prev, ok := pullRequests[prKey]
+	if !ok {
+		return errors.New("pull request not found")
+	}
+	pullRequests[prKey] = pullRequestProviderState{
+		id:        prev.id,
+		state:     v1alpha1.PullRequestClosed,
+		createdAt: prev.createdAt,
+		labels:    prev.labels,
+	}
+	return nil
+}
+
 // MarkMergedExternally marks a pull request as merged on the fake SCM without going through Merge.
 func (pr *PullRequest) MarkMergedExternally(ctx context.Context, pullRequest v1alpha1.PullRequest, mergedTargetSha string) error {
 	gitRepo, err := utils.GetGitRepositoryFromObjectKey(ctx, pr.k8sClient, client.ObjectKey{Namespace: pullRequest.Namespace, Name: pullRequest.Spec.RepositoryReference.Name})
@@ -448,9 +481,44 @@ func (pr *PullRequest) MarkMergedExternally(ctx context.Context, pullRequest v1a
 	if !ok {
 		return errors.New("pull request not found")
 	}
+	sha := mergedTargetSha
+	omitShaOnNextGet := false
+	if sha == "" && pullRequest.Spec.MergeSha != "" {
+		// Simulate async SCM providers that report merged state before the merge commit SHA is available.
+		sha = pullRequest.Spec.MergeSha
+		omitShaOnNextGet = true
+	}
+	pullRequests[prKey] = pullRequestProviderState{
+		id:                           prev.id,
+		state:                        v1alpha1.PullRequestMerged,
+		createdAt:                    prev.createdAt,
+		labels:                       prev.labels,
+		mergedTargetSha:              sha,
+		omitMergedTargetShaOnNextGet: omitShaOnNextGet,
+	}
+	return nil
+}
+
+// SetMergedTargetSha updates the merge target SHA stored for a pull request on the fake SCM.
+func (pr *PullRequest) SetMergedTargetSha(ctx context.Context, pullRequest v1alpha1.PullRequest, mergedTargetSha string) error {
+	gitRepo, err := utils.GetGitRepositoryFromObjectKey(ctx, pr.k8sClient, client.ObjectKey{Namespace: pullRequest.Namespace, Name: pullRequest.Spec.RepositoryReference.Name})
+	if err != nil {
+		return fmt.Errorf("failed to get GitRepository: %w", err)
+	}
+
+	mutexPR.Lock()
+	defer mutexPR.Unlock()
+	if pullRequests == nil {
+		return errors.New("pull request not found")
+	}
+	prKey := pr.getMapKey(pullRequest, gitRepo.Spec.Fake.Owner, gitRepo.Spec.Fake.Name)
+	prev, ok := pullRequests[prKey]
+	if !ok {
+		return errors.New("pull request not found")
+	}
 	pullRequests[prKey] = pullRequestProviderState{
 		id:              prev.id,
-		state:           v1alpha1.PullRequestMerged,
+		state:           prev.state,
 		createdAt:       prev.createdAt,
 		labels:          prev.labels,
 		mergedTargetSha: mergedTargetSha,

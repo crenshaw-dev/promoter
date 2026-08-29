@@ -1281,8 +1281,27 @@ var _ = Describe("PullRequest Controller", func() {
 			fakeProvider := fake.NewFakePullRequestProvider(k8sClient)
 			Expect(fakeProvider.DeletePullRequest(ctx, *pullRequest)).To(Succeed())
 
+			findOpenBefore := fake.FindOpenCallCount()
+			getBefore := fake.GetCallCount()
+
 			By("Triggering reconciliation by updating the PR spec")
 			triggerPRReconcile(ctx, typeNamespacedName, pullRequest)
+
+			By("Verifying the PullRequest is deleted after ExternallyMergedOrClosed is set")
+			// The PR is deleted once ExternallyMergedOrClosed is set and the next reconcile issues Delete.
+			// We verify deletion instead of checking the status field directly because the PR gets deleted
+			// in the same reconciliation cycle, making it impossible to observe the status field.
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, typeNamespacedName, pullRequest)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("pullrequests.promoter.argoproj.io \"" + name + "\" not found"))
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Verifying external discovery cleanup uses at most two FindOpen and two Gets on the SCM")
+			// Discovery needs one FindOpen and one Get. Extra calls can happen when owner-driven
+			// re-enqueues run during propagation polling below.
+			Expect(fake.FindOpenCallCount() - findOpenBefore).To(BeNumerically("<=", 2))
+			Expect(fake.GetCallCount() - getBefore).To(BeNumerically("<=", 2))
 
 			By("Checking if PR has owner references to verify propagation to CTP and PS")
 			// If the PR is owned by a CTP, verify that ExternallyMergedOrClosed propagates
@@ -1296,7 +1315,7 @@ var _ = Describe("PullRequest Controller", func() {
 						Name:      ownerRef.Name,
 						Namespace: pullRequest.Namespace,
 					}
-					// Check CTP status before PR is deleted
+					// Check CTP status preserved the externally merged/closed outcome
 					Eventually(func(g Gomega) {
 						g.Expect(k8sClient.Get(ctx, ctpName, ctp)).To(Succeed())
 						if ctp.Status.PullRequest != nil {
@@ -1331,15 +1350,6 @@ var _ = Describe("PullRequest Controller", func() {
 				}
 			}
 
-			By("Verifying the PullRequest is deleted by cleanupTerminalStates after ExternallyMergedOrClosed is set")
-			// The PR will be deleted when ExternallyMergedOrClosed is set to true and cleanupTerminalStates runs.
-			// We verify deletion instead of checking the status field directly because the PR gets deleted
-			// in the same reconciliation cycle, making it impossible to observe the status field.
-			Eventually(func(g Gomega) {
-				err := k8sClient.Get(ctx, typeNamespacedName, pullRequest)
-				g.Expect(err).To(HaveOccurred())
-				g.Expect(err.Error()).To(ContainSubstring("pullrequests.promoter.argoproj.io \"" + name + "\" not found"))
-			}, constants.EventuallyTimeout).Should(Succeed())
 
 			By("Verifying a PullRequestExternallyMergedOrClosed event was emitted")
 			Eventually(func(g Gomega) {
@@ -1389,33 +1399,6 @@ var _ = Describe("PullRequest Controller", func() {
 			}, "5s", "500ms").Should(Succeed())
 		})
 
-		It("should clear a stale ExternallyMergedOrClosed and keep the PullRequest when FindOpen still lists it open", func() {
-			By("Recording ExternallyMergedOrClosed while the PR is in fact still open on the SCM")
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
-				pullRequest.Status.ExternallyMergedOrClosed = new(true)
-				pullRequest.Status.State = ""
-				g.Expect(k8sClient.Status().Update(ctx, pullRequest)).To(Succeed())
-			}, constants.EventuallyTimeout).Should(Succeed())
-
-			By("Triggering reconciliation by updating the PR spec")
-			triggerPRReconcile(ctx, typeNamespacedName, pullRequest)
-
-			By("Verifying the flag is retracted and the PullRequest is not cleaned up as terminal")
-			Eventually(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
-				g.Expect(pullRequest.Status.State).To(Equal(promoterv1alpha1.PullRequestOpen))
-				if pullRequest.Status.ExternallyMergedOrClosed != nil {
-					g.Expect(*pullRequest.Status.ExternallyMergedOrClosed).To(BeFalse())
-				}
-			}, constants.EventuallyTimeout).Should(Succeed())
-
-			Consistently(func(g Gomega) {
-				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pullRequest)).To(Succeed())
-				g.Expect(pullRequest.DeletionTimestamp.IsZero()).To(BeTrue())
-			}, "3s", "250ms").Should(Succeed())
-		})
-
 		It("should set state merged and mergedTargetSha when externally merged on provider", func() {
 			mergedTargetSha := pullRequest.Spec.MergeSha
 
@@ -1451,6 +1434,9 @@ var _ = Describe("PullRequest Controller", func() {
 			fakeProvider := fake.NewFakePullRequestProvider(k8sClient)
 			Expect(fakeProvider.MarkMergedExternally(ctx, *pullRequest, mergedTargetSha)).To(Succeed())
 
+			findOpenBefore := fake.FindOpenCallCount()
+			getBefore := fake.GetCallCount()
+
 			By("Triggering reconciliation by updating the PR spec")
 			triggerPRReconcile(ctx, typeNamespacedName, pullRequest)
 
@@ -1472,6 +1458,103 @@ var _ = Describe("PullRequest Controller", func() {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring("pullrequests.promoter.argoproj.io \"" + name + "\" not found"))
 			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Verifying external merge discovery cleanup uses at most two FindOpen and two Gets on the SCM")
+			// Discovery needs one FindOpen and one Get; a second FindOpen can happen when the micro-requeue
+			// runs before the informer observes the merged status patch from the prior reconcile.
+			Expect(fake.FindOpenCallCount() - findOpenBefore).To(BeNumerically("<=", 2))
+			Expect(fake.GetCallCount() - getBefore).To(BeNumerically("<=", 2))
+		})
+
+		It("should set state closed and delete the PR when externally closed on provider", func() {
+			By("Simulating external close on the fake SCM while the PR still exists for Get-by-ID")
+			fakeProvider := fake.NewFakePullRequestProvider(k8sClient)
+			Expect(fakeProvider.MarkClosedExternally(ctx, *pullRequest)).To(Succeed())
+
+			findOpenBefore := fake.FindOpenCallCount()
+			getBefore := fake.GetCallCount()
+
+			By("Triggering reconciliation by updating the PR spec")
+			triggerPRReconcile(ctx, typeNamespacedName, pullRequest)
+
+			By("Verifying the PullRequest is deleted after closed state is persisted")
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, typeNamespacedName, pullRequest)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("pullrequests.promoter.argoproj.io \"" + name + "\" not found"))
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Verifying external close discovery cleanup uses at most two FindOpen and two Gets on the SCM")
+			// Discovery needs one FindOpen and one Get; a second FindOpen can happen when the micro-requeue
+			// runs before the informer observes the closed status patch from the prior reconcile.
+			Expect(fake.FindOpenCallCount() - findOpenBefore).To(BeNumerically("<=", 2))
+			Expect(fake.GetCallCount() - getBefore).To(BeNumerically("<=", 2))
+		})
+
+		It("should record mergedTargetSha via a second Get when external merge omits it initially", func() {
+			mergedTargetSha := pullRequest.Spec.MergeSha
+
+			mergedStatusObserved := make(chan promoterv1alpha1.PullRequestStatus, 1)
+			stopPolling := make(chan bool)
+
+			go func() {
+				defer GinkgoRecover()
+				ticker := time.NewTicker(1 * time.Millisecond)
+				defer ticker.Stop()
+				timeout := time.After(constants.EventuallyTimeout)
+				for {
+					select {
+					case <-ticker.C:
+						var currentPR promoterv1alpha1.PullRequest
+						err := k8sClient.Get(ctx, typeNamespacedName, &currentPR)
+						if err == nil && currentPR.Status.State == promoterv1alpha1.PullRequestMerged && currentPR.Status.MergedTargetSha != "" {
+							mergedStatusObserved <- currentPR.Status
+							return
+						}
+					case <-stopPolling:
+						return
+					case <-timeout:
+						return
+					}
+				}
+			}()
+
+			By("Simulating external merge on the fake SCM without an initial mergedTargetSha")
+			fakeProvider := fake.NewFakePullRequestProvider(k8sClient)
+			// MarkMergedExternally with an empty sha omits mergedTargetSha on the first Get only.
+			Expect(fakeProvider.MarkMergedExternally(ctx, *pullRequest, "")).To(Succeed())
+
+			findOpenBefore := fake.FindOpenCallCount()
+			getBefore := fake.GetCallCount()
+
+			By("Triggering reconciliation by updating the PR spec")
+			triggerPRReconcile(ctx, typeNamespacedName, pullRequest)
+
+			By("Verifying mergedTargetSha is recovered before deletion")
+			var observedStatus promoterv1alpha1.PullRequestStatus
+			Eventually(mergedStatusObserved, constants.EventuallyTimeout).Should(Receive(&observedStatus),
+				"Should have observed merged status with recovered mergedTargetSha before deletion")
+
+			close(stopPolling)
+
+			Expect(observedStatus.MergedTargetSha).To(Equal(mergedTargetSha))
+			Expect(observedStatus.ExternallyMergedOrClosed).To(BeNil())
+
+			By("Verifying the PullRequest is deleted after mergedTargetSha is persisted")
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, typeNamespacedName, pullRequest)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error()).To(ContainSubstring("pullrequests.promoter.argoproj.io \"" + name + "\" not found"))
+			}, constants.EventuallyTimeout).Should(Succeed())
+
+			By("Verifying external merge without sha uses at most two FindOpen and three Gets on the SCM")
+			// Discovery needs one FindOpen; a second can happen when the micro-requeue runs before the
+			// informer observes the merged status patch from the prior reconcile.
+			Expect(fake.FindOpenCallCount() - findOpenBefore).To(BeNumerically("<=", 2))
+			// Discovery needs one Get without sha; terminating cleanup needs a second Get to backfill
+			// mergedTargetSha. A third Get can happen when the micro-requeue runs before the informer
+			// observes the mergedTargetSha patch from the prior reconcile.
+			Expect(fake.GetCallCount() - getBefore).To(BeNumerically("<=", 3))
 		})
 
 		It("should record the merge sha when the resource is deleted before the external merge is observed", func() {

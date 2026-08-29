@@ -173,6 +173,18 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
 	}
 
+	if prStatusIsMergedOrClosed(&pr) {
+		// PR is closed on the SCM. Delete PullRequest resource to go through cleanup logic.
+		if err = r.Delete(ctx, &pr); err != nil && !k8serrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("failed to delete PullRequest that's merged or closed on the SCM: %w", err)
+		}
+		// Requeue immediately so cleanup logic kicks in.
+		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
+	}
+
+	// Nothing after this point should call r.Delete! Instead, update the status to the merged/closed state, and requeue
+	// for the next reconcile to handle it.
+
 	// This short-circuit avoids FindOpen (and other) SCM calls for a very narrow kind of reconcile:
 	// where the PR is marked open, the resource isn't being deleted, the spec has changed, and the
 	// _only_ changes to the spec do not require an Update to the SCM PR (title/description) or
@@ -222,11 +234,6 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
 	}
 
-	// Clean up already closed/merged PRs
-	if cleaned, err := r.cleanupTerminalStates(ctx, &pr); cleaned || err != nil {
-		return ctrl.Result{}, err
-	}
-
 	r.syncAppliedLabelsFromFindOpen(&pr, openResult)
 
 	// Handle state transitions
@@ -234,15 +241,12 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	// If a state transition was performed (merge or close), requeue immediately to trigger
-	// cleanup on the next reconciliation. The flow is:
+	// If a state transition was performed (merge or close), requeue immediately so the next
+	// reconciliation can act on the persisted terminal outcome. The flow is:
 	// 1. handleStateTransitions updates pr.Status.State to Merged/Closed in memory
 	// 2. We return here with RequeueAfter
 	// 3. The deferred HandleReconciliationResult persists the status update to the cluster
-	// 4. The next reconciliation sees the persisted Merged/Closed state
-	// 5. cleanupTerminalStates (which runs earlier in the loop) handles deletion
-	// Previously, merge/close would delete inline, but this was problematic because the status
-	// update would be lost. Now we ensure the status is persisted before deletion occurs.
+	// 4. The next reconciliation sees the persisted Merged/Closed state and issues Delete
 	if cleanupRequired {
 		return ctrl.Result{RequeueAfter: 1 * time.Microsecond}, nil
 	}
@@ -261,26 +265,11 @@ func (r *PullRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{RequeueAfter: requeueDuration}, nil
 }
 
-// cleanupTerminalStates deletes PullRequests that have reached terminal states (merged/closed) or were externally merged/closed.
-// Returns (cleaned=true, nil) if cleaned up, (false, nil) if not applicable, or (false, err) on error.
-func (r *PullRequestReconciler) cleanupTerminalStates(ctx context.Context, pr *promoterv1alpha1.PullRequest) (bool, error) {
-	// Check if PR should be cleaned up: either externally merged/closed or in terminal state (merged/closed)
-	// When ExternallyMergedOrClosed is true, State may be empty (we don't know if merged or closed),
-	// Open (set before we detected the external action), or a terminal state.
-	externallyMergedOrClosed := pr.Status.ExternallyMergedOrClosed != nil && *pr.Status.ExternallyMergedOrClosed
+// prStatusIsMergedOrClosed deletes PullRequests that have reached terminal states (merged/closed) or were externally merged/closed.
+func prStatusIsMergedOrClosed(pr *promoterv1alpha1.PullRequest) bool {
 	isTerminalState := pr.Status.State == promoterv1alpha1.PullRequestMerged || pr.Status.State == promoterv1alpha1.PullRequestClosed
-
-	if !externallyMergedOrClosed && !isTerminalState {
-		return false, nil
-	}
-
-	// Delete and let the next reconcile assess whether we need to gather any more data from the SCM before removing our
-	// finalizer.
-	if err := r.Delete(ctx, pr); err != nil && !k8serrors.IsNotFound(err) {
-		return false, fmt.Errorf("failed to delete PullRequest: %w", err)
-	}
-
-	return true, nil
+	externallyMergedOrClosed := pr.Status.ExternallyMergedOrClosed != nil && *pr.Status.ExternallyMergedOrClosed
+	return isTerminalState || externallyMergedOrClosed
 }
 
 // syncStateFromProvider syncs the PullRequest status from the SCM provider.
