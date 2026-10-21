@@ -43,31 +43,16 @@ func (g GitAuthenticationProvider) GetGitHttpsRepoUrl(repo v1alpha1.GitRepositor
 	return repoURL
 }
 
-// GetToken retrieves the authentication token from the secret.
-// If the secret has a "token" key it is returned; otherwise the password is returned for
-// use as the HTTP Basic auth password. Returns an error when neither credential is present.
+// GetToken returns the HTTP Basic password. That is the secret password, which may be a user HTTP access token,
+// or the project or repository token when the secret has only "token".
 func (g GitAuthenticationProvider) GetToken(ctx context.Context) (string, error) {
-	if token := string(g.secret.Data["token"]); token != "" {
-		return token, nil
-	}
-	password := string(g.secret.Data["password"])
-	if password == "" {
-		return "", fmt.Errorf("secret %q must contain either 'token' or both 'username' and 'password'", g.secret.Name)
-	}
-	return password, nil
+	_, password, _, err := credentialsFromSecret(g.secret)
+	return password, err
 }
 
-// GetUser returns the username for Bitbucket DataCenter/Server git basic auth.
-// A user HTTP access token is sent as the password alongside the username from the secret. A project or repository
-// token has no owning username; Bitbucket expects the username x-token-auth. A password credential uses the username
-// from the secret. Returns an error when neither credential is present.
+// GetUser returns the HTTP Basic username. Username and password must be set together. A project or repository
+// token has no owning username, so a secret with only "token" uses x-token-auth.
 func (g GitAuthenticationProvider) GetUser(ctx context.Context) (string, error) {
-	username := string(g.secret.Data["username"])
-	if string(g.secret.Data["token"]) != "" && username == "" {
-		return "x-token-auth", nil
-	}
-	if username == "" {
-		return "", fmt.Errorf("secret %q must contain either 'token' or both 'username' and 'password'", g.secret.Name)
-	}
-	return username, nil
+	username, _, _, err := credentialsFromSecret(g.secret)
+	return username, err
 }

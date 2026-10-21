@@ -462,18 +462,18 @@ cannot create merge commits for a user without one.
 
 **ScmProvider**
 
-Create a Kubernetes Secret with either an HTTP access token or username/password credentials:
+Create a Kubernetes Secret with either a username and password, or a project or repository HTTP access token:
 
 ```yaml
-# Option 1: user HTTP access token
+# Option 1: username and password. Put a user HTTP access token in password.
 apiVersion: v1
 kind: Secret
 metadata:
   name: <your-secret-name>
 type: Opaque
 stringData:
-  username: <the-user-that-owns-the-token>
-  token: <your-http-access-token>
+  username: <your-username>
+  password: <your-password-or-user-http-access-token>
 ---
 # Option 2: project or repository HTTP access token
 apiVersion: v1
@@ -483,21 +483,12 @@ metadata:
 type: Opaque
 stringData:
   token: <your-http-access-token>
----
-# Option 3: HTTP Basic Auth (username/password)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: <your-secret-name>
-type: Opaque
-stringData:
-  username: <your-username>
-  password: <your-password>
 ```
 
-Git uses HTTP Basic auth. A user token is the password for `username`. A project or repository token is the password
-for the username `x-token-auth`, which the controller supplies when the secret has no username. REST calls send a
-token as an `Authorization: Bearer` header.
+`username` and `password` must be set together. Git and REST send that pair as HTTP Basic. A user HTTP access token is
+the password for the user that owns it. A project or repository token has no username: set `token` alone. Git sends it
+as the password for `x-token-auth`, and REST sends it as an `Authorization: Bearer` header. On Bitbucket 10, Basic auth
+is disabled until it is re-enabled, so the username and password form needs that setting. The `token` form does not.
 
 Create a ScmProvider referencing the secret and your Bitbucket DataCenter/Server hostname:
 

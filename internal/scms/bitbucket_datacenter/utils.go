@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,23 +22,35 @@ type Client struct {
 	authHeader string
 }
 
-// GetClient creates a new Bitbucket DataCenter/Server client using credentials from the given secret.
-// The secret must contain either a "token" key (Personal Access Token / HTTP Bearer) or both
-// "username" and "password" keys (HTTP Basic Auth).
-func GetClient(domain string, secret corev1.Secret) (*Client, error) {
+// credentialsFromSecret reads a Bitbucket DataCenter/Server secret.
+// A token alone is a project or repository HTTP access token: git uses the username x-token-auth and REST uses Bearer.
+// Username and password must be set together. A user HTTP access token belongs in password, and both git and REST use Basic.
+func credentialsFromSecret(secret *corev1.Secret) (username, password string, bearer bool, err error) {
 	token := string(secret.Data["token"])
-	username := string(secret.Data["username"])
-	password := string(secret.Data["password"])
-
-	var authHeader string
+	username = string(secret.Data["username"])
+	password = string(secret.Data["password"])
 	switch {
-	case token != "":
-		authHeader = "Bearer " + token
-	case username != "" && password != "":
-		credentials := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
-		authHeader = "Basic " + credentials
+	case token != "" && username == "" && password == "":
+		return "x-token-auth", token, true, nil
+	case token == "" && username != "" && password != "":
+		return username, password, false, nil
 	default:
-		return nil, fmt.Errorf("secret %q must contain either 'token' or both 'username' and 'password'", secret.Name)
+		return "", "", false, fmt.Errorf("secret %q must contain either 'token' alone, or both 'username' and 'password'", secret.Name)
+	}
+}
+
+// GetClient creates a new Bitbucket DataCenter/Server client using credentials from the given secret.
+// The secret must contain either a "token" key alone (project or repository HTTP access token, sent as Bearer)
+// or both "username" and "password" (HTTP Basic). A user HTTP access token goes in "password".
+func GetClient(domain string, secret corev1.Secret) (*Client, error) {
+	username, password, bearer, err := credentialsFromSecret(&secret)
+	if err != nil {
+		return nil, err
+	}
+
+	authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	if bearer {
+		authHeader = "Bearer " + password
 	}
 
 	return &Client{
@@ -88,21 +99,19 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (int, []
 }
 
 // ApplyHTTPAuth applies Bitbucket DataCenter authentication to the HTTP request.
-// It prefers Bearer token auth, and falls back to HTTP Basic auth.
+// A token alone is sent as Bearer. Username and password are sent as Basic.
 func ApplyHTTPAuth(secret corev1.Secret, req *http.Request) error {
-	token := string(secret.Data["token"])
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	username, password, bearer, err := credentialsFromSecret(&secret)
+	if err != nil {
+		return err
+	}
+	if bearer {
+		req.Header.Set("Authorization", "Bearer "+password)
 		return nil
 	}
-	username := string(secret.Data["username"])
-	password := string(secret.Data["password"])
-	if username != "" && password != "" {
-		credentials := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
-		req.Header.Set("Authorization", "Basic "+credentials)
-		return nil
-	}
-	return errors.New("token or username/password required in secret for Bitbucket DataCenter SCM auth")
+	credentials := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	req.Header.Set("Authorization", "Basic "+credentials)
+	return nil
 }
 
 // phaseToBuildState converts a CommitStatusPhase to a Bitbucket DataCenter/Server build state.

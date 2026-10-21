@@ -32,20 +32,7 @@ var _ = Describe("GitAuthenticationProvider", func() {
 			Expect(token).To(Equal("s3cret"))
 		})
 
-		It("uses the secret username and the token for a user HTTP access token", func() {
-			provider := newProvider(map[string][]byte{
-				"username": []byte("alice"),
-				"token":    []byte("s3cret"),
-			})
-			user, err := provider.GetUser(context.Background())
-			Expect(err).NotTo(HaveOccurred())
-			token, err := provider.GetToken(context.Background())
-			Expect(err).NotTo(HaveOccurred())
-			Expect(user).To(Equal("alice"))
-			Expect(token).To(Equal("s3cret"))
-		})
-
-		It("uses the secret username and password", func() {
+		It("uses the secret username and password, including a user token stored as the password", func() {
 			provider := newProvider(map[string][]byte{
 				"username": []byte("alice"),
 				"password": []byte("pw"),
@@ -56,6 +43,17 @@ var _ = Describe("GitAuthenticationProvider", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(user).To(Equal("alice"))
 			Expect(token).To(Equal("pw"))
+		})
+
+		It("rejects a username paired with a token", func() {
+			provider := newProvider(map[string][]byte{
+				"username": []byte("alice"),
+				"token":    []byte("s3cret"),
+			})
+			_, err := provider.GetUser(context.Background())
+			Expect(err).To(HaveOccurred())
+			_, err = provider.GetToken(context.Background())
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })
