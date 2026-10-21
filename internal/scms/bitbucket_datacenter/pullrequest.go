@@ -161,7 +161,7 @@ func (pr *PullRequest) Update(ctx context.Context, title, description string, pr
 	}
 
 	// Fetch the current PR to get the version required by the API.
-	_, current, err := pr.getPR(ctx, projectKey, repoSlug, prID)
+	_, current, err := pr.getPR(ctx, repo, projectKey, repoSlug, prID)
 	if err != nil {
 		return fmt.Errorf("failed to get pull request %d for update: %w", prID, err)
 	}
@@ -218,7 +218,7 @@ func (pr *PullRequest) Close(ctx context.Context, prObj v1alpha1.PullRequest) er
 		return fmt.Errorf("failed to convert PR ID %q to int: %w", prObj.Status.ID, err)
 	}
 
-	_, current, err := pr.getPR(ctx, projectKey, repoSlug, prID)
+	_, current, err := pr.getPR(ctx, repo, projectKey, repoSlug, prID)
 	if err != nil {
 		return fmt.Errorf("failed to get pull request %d before declining: %w", prID, err)
 	}
@@ -265,7 +265,7 @@ func (pr *PullRequest) Merge(ctx context.Context, prObj v1alpha1.PullRequest) (s
 		return scms.MergeResult{}, fmt.Errorf("failed to convert PR ID %q to int: %w", prObj.Status.ID, err)
 	}
 
-	_, current, err := pr.getPR(ctx, projectKey, repoSlug, prID)
+	_, current, err := pr.getPR(ctx, repo, projectKey, repoSlug, prID)
 	if err != nil {
 		return scms.MergeResult{}, fmt.Errorf("failed to get pull request %d before merging: %w", prID, err)
 	}
@@ -386,12 +386,7 @@ func (pr *PullRequest) Get(ctx context.Context, pullRequest v1alpha1.PullRequest
 		return scms.GetPullRequestResult{}, fmt.Errorf("failed to convert PR ID %q to int: %w", pullRequest.Status.ID, err)
 	}
 
-	start := time.Now()
-	statusCode, current, err := pr.getPR(ctx, repo.Spec.BitbucketDataCenter.Project, repo.Spec.BitbucketDataCenter.Name, prID)
-	if err != nil && statusCode == 0 {
-		statusCode = http.StatusInternalServerError
-	}
-	metrics.RecordSCMCall(ctx, repo, metrics.SCMAPIPullRequest, metrics.SCMOperationGet, statusCode, time.Since(start), nil)
+	statusCode, current, err := pr.getPR(ctx, repo, repo.Spec.BitbucketDataCenter.Project, repo.Spec.BitbucketDataCenter.Name, prID)
 	if statusCode == http.StatusNotFound {
 		return scms.GetPullRequestResult{}, nil
 	}
@@ -506,9 +501,14 @@ func (pr *PullRequest) mergeCommitFromActivities(ctx context.Context, repo *v1al
 }
 
 // getPR fetches the current state of a pull request including its version.
-func (pr *PullRequest) getPR(ctx context.Context, projectKey, repoSlug string, prID int) (int, *prResponse, error) {
+func (pr *PullRequest) getPR(ctx context.Context, repo *v1alpha1.GitRepository, projectKey, repoSlug string, prID int) (int, *prResponse, error) {
 	path := fmt.Sprintf("%s/%d", prPath(projectKey, repoSlug), prID)
+	start := time.Now()
 	statusCode, body, err := pr.client.do(ctx, http.MethodGet, path, nil)
+	if err != nil && statusCode == 0 {
+		statusCode = http.StatusInternalServerError
+	}
+	metrics.RecordSCMCall(ctx, repo, metrics.SCMAPIPullRequest, metrics.SCMOperationGet, statusCode, time.Since(start), nil)
 	if err != nil {
 		return statusCode, nil, fmt.Errorf("failed to get pull request: %w", err)
 	}
