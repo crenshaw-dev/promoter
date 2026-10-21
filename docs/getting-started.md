@@ -465,7 +465,17 @@ cannot create merge commits for a user without one.
 Create a Kubernetes Secret with either an HTTP access token or username/password credentials:
 
 ```yaml
-# Option 1: HTTP access token (recommended)
+# Option 1: user HTTP access token
+apiVersion: v1
+kind: Secret
+metadata:
+  name: <your-secret-name>
+type: Opaque
+stringData:
+  username: <the-user-that-owns-the-token>
+  token: <your-http-access-token>
+---
+# Option 2: project or repository HTTP access token
 apiVersion: v1
 kind: Secret
 metadata:
@@ -474,7 +484,7 @@ type: Opaque
 stringData:
   token: <your-http-access-token>
 ---
-# Option 2: HTTP Basic Auth (username/password)
+# Option 3: HTTP Basic Auth (username/password)
 apiVersion: v1
 kind: Secret
 metadata:
@@ -485,8 +495,9 @@ stringData:
   password: <your-password>
 ```
 
-The token is sent as an `Authorization: Bearer` header for both REST API calls and git operations over HTTPS, so no
-username is needed.
+Git uses HTTP Basic auth. A user token is the password for `username`. A project or repository token is the password
+for the username `x-token-auth`, which the controller supplies when the secret has no username. REST calls send a
+token as an `Authorization: Bearer` header.
 
 Create a ScmProvider referencing the secret and your Bitbucket DataCenter/Server hostname:
 

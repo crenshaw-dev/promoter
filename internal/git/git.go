@@ -736,16 +736,6 @@ func gitChildEnv(user, token string, extraEnv []string) []string {
 	return append(env, extraEnv...)
 }
 
-// gitHTTPHeaderEnv sets http.<urlPrefix>.extraHeader through git's env-based config, which keeps the header out
-// of the process arguments.
-func gitHTTPHeaderEnv(urlPrefix, header string) []string {
-	return []string{
-		"GIT_CONFIG_COUNT=1",
-		"GIT_CONFIG_KEY_0=http." + urlPrefix + ".extraHeader",
-		"GIT_CONFIG_VALUE_0=" + header,
-	}
-}
-
 // runCmdWithEnv runs a git command, appending extraEnv to the standard auth environment, and
 // returns stdout, stderr, and error.
 func runCmdWithEnv(ctx context.Context, gap scms.GitOperationsProvider, directory string, extraEnv []string, args ...string) (string, string, error) {
@@ -767,15 +757,6 @@ func runCmdWithEnvAndStdin(ctx context.Context, gap scms.GitOperationsProvider, 
 	}
 
 	env := gitChildEnv(user, token, extraEnv)
-	if headerProvider, ok := gap.(scms.GitHTTPHeaderProvider); ok {
-		urlPrefix, header, err := headerProvider.GetGitHTTPHeader(ctx)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to get git HTTP header: %w", err)
-		}
-		if header != "" {
-			env = append(env, gitHTTPHeaderEnv(urlPrefix, header)...)
-		}
-	}
 
 	cmd := gitCommandContext(ctx, args...)
 	cmd.Env = env

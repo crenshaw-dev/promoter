@@ -21,21 +21,41 @@ var _ = Describe("GitAuthenticationProvider", func() {
 		return provider
 	}
 
-	Describe("GetGitHTTPHeader", func() {
-		It("returns a Bearer header scoped to the domain when the secret has a token", func() {
-			urlPrefix, header, err := newProvider(map[string][]byte{"token": []byte("s3cret")}).GetGitHTTPHeader(context.Background())
+	Describe("git basic auth", func() {
+		It("uses x-token-auth and the token for a project or repository token", func() {
+			provider := newProvider(map[string][]byte{"token": []byte("s3cret")})
+			user, err := provider.GetUser(context.Background())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(urlPrefix).To(Equal("https://bitbucket.example.com/"))
-			Expect(header).To(Equal("Authorization: Bearer s3cret"))
+			token, err := provider.GetToken(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(user).To(Equal("x-token-auth"))
+			Expect(token).To(Equal("s3cret"))
 		})
 
-		It("returns no header for username/password credentials", func() {
-			_, header, err := newProvider(map[string][]byte{
+		It("uses the secret username and the token for a user HTTP access token", func() {
+			provider := newProvider(map[string][]byte{
+				"username": []byte("alice"),
+				"token":    []byte("s3cret"),
+			})
+			user, err := provider.GetUser(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			token, err := provider.GetToken(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(user).To(Equal("alice"))
+			Expect(token).To(Equal("s3cret"))
+		})
+
+		It("uses the secret username and password", func() {
+			provider := newProvider(map[string][]byte{
 				"username": []byte("alice"),
 				"password": []byte("pw"),
-			}).GetGitHTTPHeader(context.Background())
+			})
+			user, err := provider.GetUser(context.Background())
 			Expect(err).NotTo(HaveOccurred())
-			Expect(header).To(BeEmpty())
+			token, err := provider.GetToken(context.Background())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(user).To(Equal("alice"))
+			Expect(token).To(Equal("pw"))
 		})
 	})
 })

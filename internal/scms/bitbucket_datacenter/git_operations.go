@@ -17,10 +17,7 @@ type GitAuthenticationProvider struct {
 	secret      *corev1.Secret
 }
 
-var (
-	_ scms.GitOperationsProvider = &GitAuthenticationProvider{}
-	_ scms.GitHTTPHeaderProvider = &GitAuthenticationProvider{}
-)
+var _ scms.GitOperationsProvider = &GitAuthenticationProvider{}
 
 // NewBitbucketDataCenterGitAuthenticationProvider creates a new instance of GitAuthenticationProvider
 // for Bitbucket DataCenter/Server.
@@ -60,28 +57,17 @@ func (g GitAuthenticationProvider) GetToken(ctx context.Context) (string, error)
 	return password, nil
 }
 
-// GetUser returns the username for Bitbucket DataCenter/Server authentication.
-// When a token is present git authenticates with the Bearer header from GetGitHTTPHeader, so the
-// returned "x-token-auth" is only a placeholder; otherwise the username from the secret is returned.
-// Returns an error when neither credential is present.
+// GetUser returns the username for Bitbucket DataCenter/Server git basic auth.
+// A user HTTP access token is sent as the password alongside the username from the secret. A project or repository
+// token has no owning username; Bitbucket expects the username x-token-auth. A password credential uses the username
+// from the secret. Returns an error when neither credential is present.
 func (g GitAuthenticationProvider) GetUser(ctx context.Context) (string, error) {
-	if string(g.secret.Data["token"]) != "" {
+	username := string(g.secret.Data["username"])
+	if string(g.secret.Data["token"]) != "" && username == "" {
 		return "x-token-auth", nil
 	}
-	username := string(g.secret.Data["username"])
 	if username == "" {
 		return "", fmt.Errorf("secret %q must contain either 'token' or both 'username' and 'password'", g.secret.Name)
 	}
 	return username, nil
-}
-
-// GetGitHTTPHeader returns a Bearer authorization header scoped to the Bitbucket DataCenter/Server domain when the
-// secret holds a token. Bitbucket DataCenter/Server rejects a token in HTTP Basic auth unless it is paired with the
-// username that owns it, which the secret does not carry.
-func (g GitAuthenticationProvider) GetGitHTTPHeader(ctx context.Context) (string, string, error) {
-	token := string(g.secret.Data["token"])
-	if token == "" {
-		return "", "", nil
-	}
-	return "https://" + g.scmProvider.GetSpec().BitbucketDataCenter.Domain + "/", "Authorization: Bearer " + token, nil
 }
