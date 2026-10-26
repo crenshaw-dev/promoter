@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ktrysmt/go-bitbucket"
@@ -199,6 +200,12 @@ func (pr *PullRequest) Merge(ctx context.Context, prObj v1alpha1.PullRequest) (s
 	metrics.RecordSCMCall(ctx, repo, metrics.SCMAPIPullRequest, metrics.SCMOperationMerge, statusCode, time.Since(start), nil)
 
 	if err != nil {
+		// A retry finds the pull request already merged. Read the merge commit instead of failing
+		// the reconcile for good, which is what happens when the first attempt landed the merge
+		// and then failed to expand the abbreviated hash.
+		if bitbucketAlreadyMerged(err) {
+			return pr.mergedTargetFromGet(ctx, prObj)
+		}
 		if unexpectedErr, ok := errors.AsType[*bitbucket.UnexpectedResponseStatusError](err); ok {
 			return scms.MergeResult{}, fmt.Errorf("failed to merge request: %w", unexpectedErr.ErrorWithBody())
 		}
@@ -208,18 +215,42 @@ func (pr *PullRequest) Merge(ctx context.Context, prObj v1alpha1.PullRequest) (s
 	logger.V(4).Info("bitbucket response status", "status", statusCode)
 	logger.V(4).Info("merged pull request", "id", prObj.Status.ID)
 
-	// The merge response echoes the pull request, including merge_commit. A missing or
-	// unresolvable hash is not fatal here: the controller falls back to a Get-by-ID lookup.
+	// The merge response echoes the pull request, including merge_commit. A missing hash is not
+	// fatal here: the controller falls back to a Get-by-ID lookup. A hash that cannot be resolved
+	// is fatal: reporting success with an empty SHA persists state=merged and the next reconcile
+	// deletes the PullRequest before the SHA exists.
 	hash := mergeCommitHash(result)
 	if hash == "" {
 		return scms.MergeResult{}, nil
 	}
 	fullHash, err := pr.resolveCommitHash(ctx, repo, hash)
 	if err != nil {
-		logger.V(4).Info("could not resolve merge commit hash from merge response", "hash", hash, "error", err.Error())
-		return scms.MergeResult{}, nil
+		return scms.MergeResult{}, fmt.Errorf("failed to resolve merge commit hash %q: %w", hash, err)
 	}
 	return scms.MergeResult{CommitSHA: fullHash}, nil
+}
+
+// bitbucketAlreadyMerged reports whether err is Bitbucket's response to merging a pull request
+// that has already been merged.
+func bitbucketAlreadyMerged(err error) bool {
+	unexpected, ok := errors.AsType[*bitbucket.UnexpectedResponseStatusError](err)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(string(unexpected.Body)), "already merged")
+}
+
+// mergedTargetFromGet reads the merge commit from the pull request. Used when Merge is retried
+// after the pull request has already been merged.
+func (pr *PullRequest) mergedTargetFromGet(ctx context.Context, prObj v1alpha1.PullRequest) (scms.MergeResult, error) {
+	details, err := pr.Get(ctx, prObj)
+	if err != nil {
+		return scms.MergeResult{}, err
+	}
+	if !details.Found || details.State != v1alpha1.PullRequestMerged || details.MergedTargetSHA == "" {
+		return scms.MergeResult{}, fmt.Errorf("pull request %q is already merged but the merge commit is not available yet", prObj.Status.ID)
+	}
+	return scms.MergeResult{CommitSHA: details.MergedTargetSHA}, nil
 }
 
 // mergeCommitHash extracts merge_commit.hash from a Bitbucket pull request payload. Bitbucket
