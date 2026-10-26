@@ -293,7 +293,7 @@ var _ = Describe("TimedCommitStatus Controller", Ordered, func() {
 		})
 
 		It("should report pending status when time requirement is not met", func() {
-			By("Waiting for initial TimedCommitStatus to be in pending phase")
+			By("Waiting for the TimedCommitStatus and its CommitStatus to report pending")
 			Eventually(func(g Gomega) {
 				var tcs promoterv1alpha1.TimedCommitStatus
 				err := k8sClient.Get(ctx, types.NamespacedName{
@@ -316,6 +316,18 @@ var _ = Describe("TimedCommitStatus Controller", Ordered, func() {
 				// Verify the duration requirement has NOT been met (time remaining should be > 0)
 				g.Expect(tcs.Status.Environments[0].AtMostDurationRemaining.Duration).To(BeNumerically(">", 0),
 					"AtMostDurationRemaining must be > 0 for pending phase")
+
+				// Parent status is applied even when the child upsert fails, so wait until the
+				// CommitStatus exists before Consistently requires it on the first poll.
+				commitStatusName := utils.CommitStatusResourceName(ctx, &tcs, testBranchDevelopment)
+				var cs promoterv1alpha1.CommitStatus
+				err = k8sClient.Get(ctx, types.NamespacedName{
+					Name:      commitStatusName,
+					Namespace: "default",
+				}, &cs)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cs.Spec.Phase).To(Equal(promoterv1alpha1.CommitPhasePending),
+					"CommitStatus phase should be pending when required duration not met")
 			}, constants.EventuallyTimeout).Should(Succeed())
 
 			By("Verifying phase stays pending for 10 seconds (doesn't incorrectly switch to success)")
